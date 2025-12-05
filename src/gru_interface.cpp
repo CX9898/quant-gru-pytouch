@@ -1,7 +1,7 @@
 #include "gru_interface.hpp"
 #include "quantize_ops_helper.hpp"
-#include <cuda_runtime.h>
 #include <cstdio>
+#include <cuda_runtime.h>
 #include <stdexcept>
 
 
@@ -100,7 +100,7 @@ GRUQuantitativeParameters calibrateGruScales(
     // 检查 CUDA 错误
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        const char* err_str = cudaGetErrorString(err);
+        const char *err_str = cudaGetErrorString(err);
         fprintf(stderr, "CUDA error in calibrateGruScales: %s\n", err_str);
         // 抛出异常，让调用者知道校准失败
         throw std::runtime_error(std::string("CUDA error in calibrateGruScales: ") + err_str);
@@ -340,11 +340,11 @@ void GruQuantInit(
     const int batch_size,
     const int input_size,
     const int hidden_size,
-    const float *W,     // 输入到隐藏层的权重矩阵. [input_size, hidden_size * 3] 对应三个门
-    const float *R,     // 隐藏层到隐藏层的循环权重矩阵
-    const float *bx,    // 输入偏置项（input bias），来自输入路径
-    const float *br,    // 循环偏置项（recurrent bias），来自循环路径
-    const float *x,     // 输入序列张量
+    const float *W, // 输入到隐藏层的权重矩阵. [input_size, hidden_size * 3] 对应三个门
+    const float *R, // 隐藏层到隐藏层的循环权重矩阵
+    const float *bx,// 输入偏置项（input bias），来自输入路径
+    const float *br,// 循环偏置项（recurrent bias），来自循环路径
+    const float *x, // 输入序列张量
     QuantT *W_quant,
     QuantT *R_quant,
     int32_t *bx_quant,
@@ -378,11 +378,11 @@ template void GruQuantInit<int8_t>(
     const int batch_size,
     const int input_size,
     const int hidden_size,
-    const float *W,     // 输入到隐藏层的权重矩阵. [input_size, hidden_size * 3] 对应三个门
-    const float *R,     // 隐藏层到隐藏层的循环权重矩阵
-    const float *bx,    // 输入偏置项（input bias），来自输入路径
-    const float *br,    // 循环偏置项（recurrent bias），来自循环路径
-    const float *x,     // 输入序列张量
+    const float *W, // 输入到隐藏层的权重矩阵. [input_size, hidden_size * 3] 对应三个门
+    const float *R, // 隐藏层到隐藏层的循环权重矩阵
+    const float *bx,// 输入偏置项（input bias），来自输入路径
+    const float *br,// 循环偏置项（recurrent bias），来自循环路径
+    const float *x, // 输入序列张量
     int8_t *W_quant,
     int8_t *R_quant,
     int32_t *bx_quant,
@@ -395,11 +395,11 @@ template void GruQuantInit<int16_t>(
     const int batch_size,
     const int input_size,
     const int hidden_size,
-    const float *W,     // 输入到隐藏层的权重矩阵. [input_size, hidden_size * 3] 对应三个门
-    const float *R,     // 隐藏层到隐藏层的循环权重矩阵
-    const float *bx,    // 输入偏置项（input bias），来自输入路径
-    const float *br,    // 循环偏置项（recurrent bias），来自循环路径
-    const float *x,     // 输入序列张量
+    const float *W, // 输入到隐藏层的权重矩阵. [input_size, hidden_size * 3] 对应三个门
+    const float *R, // 隐藏层到隐藏层的循环权重矩阵
+    const float *bx,// 输入偏置项（input bias），来自输入路径
+    const float *br,// 循环偏置项（recurrent bias），来自循环路径
+    const float *x, // 输入序列张量
     int16_t *W_quant,
     int16_t *R_quant,
     int32_t *bx_quant,

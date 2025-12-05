@@ -5,7 +5,9 @@
 #include <thrust/reduce.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
+#include <tuple>
 #include <type_traits>
 
 #include "devVector.h"
@@ -690,6 +692,37 @@ inline void linear_fit(const std::vector<float> &x, const std::vector<float> &y,
     c = (sum_y - b * sum_x) / n;
 }
 
+// 辅助函数：计算 shift_bits 并进行边界调整（与 Python 实现一致）
+// 返回 (shift_bits, adjusted_max, zero_point)
+inline std::tuple<int8_t, float, int32_t> calculate_shift_bits_and_adjust_range(
+    float f_min, float f_max, int32_t quant_max) {
+    // 步骤1: 计算原始 scale
+    float s_original_scale = (f_max - f_min) / static_cast<float>(quant_max);
+
+    // 步骤2: 转换为2的幂次方 scale = 1 / 2^n
+    // 使用 round() 而不是 ceil()，与 Python 实现一致
+    int8_t shift_bits = 0;
+    if (s_original_scale > 0) {
+        float n_shift = -std::log2(s_original_scale);
+        shift_bits = static_cast<int8_t>(std::round(n_shift));
+        shift_bits = std::max(static_cast<int8_t>(0), shift_bits);
+    }
+
+    // 步骤3: 计算 scale 和 zero_point
+    float scale = std::pow(2.0f, -static_cast<float>(shift_bits));
+    int32_t zero_point = static_cast<int32_t>(std::round(-f_min / scale));
+
+    // 步骤4: 验证边界并调整 f_max（与 Python 实现一致）
+    int32_t q_max_from_f_max = static_cast<int32_t>(std::round(f_max / scale)) + zero_point;
+    float adjusted_f_max = f_max;
+    if (q_max_from_f_max > quant_max) {
+        // 调整 f_max，使得 q_max = Q_max，保持 zero_point 不变
+        adjusted_f_max = (quant_max - zero_point) * scale;
+    }
+
+    return std::make_tuple(shift_bits, adjusted_f_max, zero_point);
+}
+
 // 自适应分段（Sigmoid 专用）
 std::vector<float> adaptive_segmentation_sigmoid(float x_min, float x_max, int num_segments) {
     std::vector<float> segment_points(num_segments + 1);
@@ -806,15 +839,14 @@ SigmoidLUT_INT16 generate_sigmoid_lut_int16(
 
         // 计算 shift_bits_bx：使 scale_bx = 2^(-shift_bits_bx) 能够覆盖 bx 的范围
         // 🔥 修正：根据 Python 参考（u16.py），bx 使用非对称量化（无符号），范围 [0, 65535]
-        // scale_bx >= bx_range / 65535 (UINT16 最大值)
-        const float max_uint16 = 65535.0f;
-        float bx_range = bx_max - bx_min;// bx 的实际范围（可能包含负值，通过 zero-point 处理）
-        if (bx_range < 1e-9f) {
-            bx_range = 1e-9f;// 避免除零
+        // 使用与 Python 一致的 round() 方法，并添加边界调整机制
+        const int32_t max_uint16 = 65535;
+        if (bx_max - bx_min < 1e-9f) {
+            bx_max = bx_min + 1e-9f;// 避免除零
         }
-        float raw_scale_bx = bx_range / max_uint16;
-        int8_t shift_bits_bx = static_cast<int8_t>(std::ceil(-std::log2(raw_scale_bx)));
-        shift_bits_bx = std::max(static_cast<int8_t>(0), shift_bits_bx);// 确保非负
+        auto [shift_bits_bx, adjusted_bx_max, zp_bx] =
+            calculate_shift_bits_and_adjust_range(bx_min, bx_max, max_uint16);
+        // 注意：adjusted_bx_max 和 zp_bx 目前不直接使用，但保持与 Python 实现一致
 
         // 6. 计算移位位数（根据文档公式）
         int8_t n_bx = shift_bits_b + shift_bits_x - shift_bits_bx;
@@ -895,15 +927,14 @@ SigmoidLUT_INT16 generate_tanh_lut_int16(
         float bx_max = std::max(bx_at_start, bx_at_end);
 
         // 🔥 修正：根据 Python 参考（u16.py），bx 使用非对称量化（无符号），范围 [0, 65535]
-        // scale_bx >= bx_range / 65535 (UINT16 最大值)
-        const float max_uint16 = 65535.0f;
-        float bx_range = bx_max - bx_min;// bx 的实际范围（可能包含负值，通过 zero-point 处理）
-        if (bx_range < 1e-9f) {
-            bx_range = 1e-9f;// 避免除零
+        // 使用与 Python 一致的 round() 方法，并添加边界调整机制
+        const int32_t max_uint16 = 65535;
+        if (bx_max - bx_min < 1e-9f) {
+            bx_max = bx_min + 1e-9f;// 避免除零
         }
-        float raw_scale_bx = bx_range / max_uint16;
-        int8_t shift_bits_bx = static_cast<int8_t>(std::ceil(-std::log2(raw_scale_bx)));
-        shift_bits_bx = std::max(static_cast<int8_t>(0), shift_bits_bx);
+        auto [shift_bits_bx, adjusted_bx_max, zp_bx] =
+            calculate_shift_bits_and_adjust_range(bx_min, bx_max, max_uint16);
+        // 注意：adjusted_bx_max 和 zp_bx 目前不直接使用，但保持与 Python 实现一致
 
         int8_t n_bx = shift_bits_b + shift_bits_x - shift_bits_bx;
         int8_t n_yb = shift_bits_bx - shift_bits_y;
@@ -1054,15 +1085,14 @@ SigmoidLUT_INT8 generate_sigmoid_lut_int8(
 
         // 计算 shift_bits_bx：使 scale_bx = 2^(-shift_bits_bx) 能够覆盖 bx 的范围
         // 🔥 修正：根据 Python 参考（u8.py），bx 使用非对称量化（无符号），范围 [0, 255]
-        // scale_bx >= bx_range / 255 (UINT8 最大值)
-        const float max_uint8 = 255.0f;
-        float bx_range = bx_max - bx_min;// bx 的实际范围（可能包含负值，通过 zero-point 处理）
-        if (bx_range < 1e-9f) {
-            bx_range = 1e-9f;// 避免除零
+        // 使用与 Python 一致的 round() 方法，并添加边界调整机制
+        const int32_t max_uint8 = 255;
+        if (bx_max - bx_min < 1e-9f) {
+            bx_max = bx_min + 1e-9f;// 避免除零
         }
-        float raw_scale_bx = bx_range / max_uint8;
-        int8_t shift_bits_bx = static_cast<int8_t>(std::ceil(-std::log2(raw_scale_bx)));
-        shift_bits_bx = std::max(static_cast<int8_t>(0), shift_bits_bx);// 确保非负
+        auto [shift_bits_bx, adjusted_bx_max, zp_bx] =
+            calculate_shift_bits_and_adjust_range(bx_min, bx_max, max_uint8);
+        // 注意：adjusted_bx_max 和 zp_bx 目前不直接使用，但保持与 Python 实现一致
 
         // 6. 计算移位位数（根据文档公式）
         int8_t n_bx = shift_bits_b + shift_bits_x - shift_bits_bx;
@@ -1146,15 +1176,14 @@ SigmoidLUT_INT8 generate_tanh_lut_int8(
         float bx_max = std::max(bx_at_start, bx_at_end);
 
         // 🔥 修正：根据 Python 参考（u8.py），bx 使用非对称量化（无符号），范围 [0, 255]
-        // scale_bx >= bx_range / 255 (UINT8 最大值)
-        const float max_uint8 = 255.0f;
-        float bx_range = bx_max - bx_min;// bx 的实际范围（可能包含负值，通过 zero-point 处理）
-        if (bx_range < 1e-9f) {
-            bx_range = 1e-9f;// 避免除零
+        // 使用与 Python 一致的 round() 方法，并添加边界调整机制
+        const int32_t max_uint8 = 255;
+        if (bx_max - bx_min < 1e-9f) {
+            bx_max = bx_min + 1e-9f;// 避免除零
         }
-        float raw_scale_bx = bx_range / max_uint8;
-        int8_t shift_bits_bx = static_cast<int8_t>(std::ceil(-std::log2(raw_scale_bx)));
-        shift_bits_bx = std::max(static_cast<int8_t>(0), shift_bits_bx);
+        auto [shift_bits_bx, adjusted_bx_max, zp_bx] =
+            calculate_shift_bits_and_adjust_range(bx_min, bx_max, max_uint8);
+        // 注意：adjusted_bx_max 和 zp_bx 目前不直接使用，但保持与 Python 实现一致
 
         int8_t n_bx = shift_bits_b + shift_bits_x - shift_bits_bx;
         int8_t n_yb = shift_bits_bx - shift_bits_y;

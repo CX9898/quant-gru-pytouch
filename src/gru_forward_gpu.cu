@@ -5,6 +5,8 @@
 #include <cuda_runtime_api.h>
 #include <tuple>
 #include <utility>
+#include <algorithm>
+#include <vector>
 
 #include "blas.h"
 #include "device_assert.h"
@@ -464,78 +466,6 @@ void ForwardPass<T>::IterateInternal(
     }
 }
 
-//template<typename T, typename QuantT>
-//std::pair<float, int32_t> calculateQuantScale(T min_val, T max_val, bool use_symmetric = true) {
-//    // 确定量化范围
-//    constexpr int32_t quant_min = std::numeric_limits<QuantT>::min();
-//    constexpr int32_t quant_max = std::numeric_limits<QuantT>::max();
-//
-//    // 处理特殊情况：min_val == max_val
-//    if (min_val == max_val) {
-//        if (std::abs(min_val) < 1e-8f) {
-//            // 全零或接近零的情况
-//            return std::make_pair(1.0f, 0);
-//        } else {
-//            // 扩展一个小的范围避免除零
-//            // 扩展范围应该是原值的 10%，而不是固定的 0.1
-//            T range = std::abs(min_val) * 0.1f;
-//            min_val -= range;
-//            max_val += range;
-//        }
-//    }
-//
-//    // 确保 min_val <= max_val
-//    if (min_val > max_val) {
-//        std::swap(min_val, max_val);
-//    }
-//
-//    float scale;
-//    int32_t zero_point;
-//
-//    if (use_symmetric) {
-//        // 对称量化：zero_point固定为0
-//        zero_point = 0;
-//
-//        // 计算最大绝对值范围
-//        T abs_max = std::max(std::abs(min_val), std::abs(max_val));
-//
-//        if (abs_max == 0) {
-//            scale = 1.0f;
-//        } else {
-//            // 对称量化的scale计算
-//            scale = static_cast<float>(abs_max) / static_cast<float>(quant_max);
-//        }
-//
-//        // 确保scale不为零
-//        if (scale == 0.0f) {
-//            scale = 1.0f;
-//        }
-//    } else {
-//        // 非对称量化
-//        // 计算scale
-//        // 注意：quant_max - quant_min 可能溢出，使用 int64_t 计算
-//        int64_t quant_range = static_cast<int64_t>(quant_max) - static_cast<int64_t>(quant_min);
-//        scale = (static_cast<float>(max_val) - static_cast<float>(min_val)) /
-//                static_cast<float>(quant_range);
-//
-//        // 确保scale不为零
-//        if (scale == 0.0f) {
-//            scale = 1.0f;
-//            zero_point = 0;
-//        } else {
-//            // 计算zero_point
-//            zero_point = static_cast<int32_t>(std::round(
-//                static_cast<float>(quant_min) - static_cast<float>(min_val) / scale
-//            ));
-//
-//            // 限制zero_point在量化范围内
-//            zero_point = std::max(quant_min, std::min(quant_max, zero_point));
-//        }
-//    }
-//
-//    return std::make_pair(scale, zero_point);
-//}
-
 template<typename T, typename QuantT>
 // 支持int8, int16量化
 std::pair<float, int32_t> calculateQuantScale(T min_val, T max_val, bool symmetric, const std::string &name = "") {
@@ -606,92 +536,6 @@ std::pair<float, int32_t> calculateQuantScale(T min_val, T max_val, bool symmetr
     return std::make_pair(scale, zero_point);
 }
 
-// // return: scale, zero_point
-// template<typename T>
-// std::pair<float, int32_t> calculateQuantScale(T min_val, T max_val, bool use_symmetric = true, bool is_int16 = false) {
-
-//     // 根据目标类型选择量化范围
-//     int qmin, qmax;
-//     if (is_int16) {
-//         if (use_symmetric) {
-//             qmin = -32768;
-//             qmax = 32767;
-//         } else {
-//             qmin = 0;
-//             qmax = 65535;
-//         }
-//     } else { // int8
-//         if (use_symmetric) {
-//             qmin = -128;
-//             qmax = 127;
-//         } else {
-//             qmin = 0;
-//             qmax = 255;
-//         }
-//     }
-
-//     float scale = 1.0f;
-//     int32_t zp = 0;
-//     if (use_symmetric) {
-//         float abs_max = std::max(std::abs(min_val), std::abs(max_val));
-//         // 避免除零
-//         if (abs_max == 0) abs_max = 1e-6f;
-//         scale = abs_max / ((float) qmax);
-//         zp = 0;
-//     } else {
-//         // 非对称量化公式：
-//         // quantized = round(real / scale + zero_point)
-//         // real = (quantized - zero_point) * scale
-//         //
-//         // 要满足：min_val 映射到 qmin, max_val 映射到 qmax
-//         // qmin = round(min_val / scale + zp) ≈ min_val / scale + zp
-//         // qmax = round(max_val / scale + zp) ≈ max_val / scale + zp
-//         //
-//         // 从这两个等式可以解出：
-//         // scale = (max_val - min_val) / (qmax - qmin)
-//         // zp = qmin - min_val / scale
-
-//         float denominator = max_val - min_val;
-//         if (denominator == 0) denominator = 1e-6f;
-//         scale = denominator / (float) (qmax - qmin);
-
-//         // 计算 zero point: zp = qmin - min_val / scale
-//         // 注意：这里需要先计算 min_val / scale，然后从 qmin 减去
-//         float zp_float = static_cast<float>(qmin) - (min_val / scale);
-//         zp = static_cast<int32_t>(std::round(zp_float));
-
-//         // 如果 zp < qmin，说明 min_val > 0，计算出的 zp 为负数
-//         // 对于非对称量化，如果数据范围是 [min_val, max_val] 且 min_val > 0，
-//         // 我们应该让数据范围映射到 [qmin, qmax]
-//         //
-//         // 方案：设置 zp = qmin = 0，然后重新计算 scale
-//         // 使得 max_val 映射到 qmax，min_val 会映射到某个值 >= qmin
-//         // scale = max_val / (qmax - zp) = max_val / qmax
-//         if (zp < qmin) {
-//             zp = qmin;  // 对于 int8 非对称，qmin = 0
-//             // 重新计算 scale，使得 max_val 映射到 qmax
-//             // max_val / scale + zp = qmax
-//             // scale = max_val / (qmax - zp) = max_val / qmax
-//             if (max_val > 1e-6f) {
-//                 scale = max_val / static_cast<float>(qmax - zp);
-//             }
-//             // 验证：min_val 会被映射到 min_val / scale + zp = min_val / scale
-//             // 这个值应该 >= qmin = 0（因为 min_val > 0, scale > 0）
-//         }
-
-//         // zp截断到[qmin, qmax]
-//         if (zp > qmax) zp = qmax;
-
-//         // 调试信息：如果 zp 被调整，输出信息
-//         if (zp_float < static_cast<float>(qmin) || zp_float > static_cast<float>(qmax)) {
-//             printf("[DEBUG calculateQuantScale] min_val=%f, max_val=%f, scale=%f, zp_float=%f, zp=%d (adjusted)\n",
-//                    min_val, max_val, scale, zp_float, zp);
-//         }
-//     }
-
-//     return std::make_pair(scale, zp);
-// }
-
 /**
 * 通用(仅host)scale/zp 计算函数
 * @param x_dev  -- 设备端输入数据指针
@@ -727,14 +571,32 @@ void calculateScalePerSteps(const T *x_dev,
         }
     }
 
-    T res_min = min[0];
-    T res_max = max[0];
-    for (int t = 1; t < steps; ++t) {
-        //        // TODO: 修改为原来的方法
-        //        res_min = 0.9 * res_min + 0.1 * min[t];
-        //        res_max = 0.9 * res_max + 0.1 * max[t];
-        res_min = std::min(res_min, min[t]);
-        res_max = std::max(res_max, max[t]);
+    // 使用中位数初始化，避免第一个时间步的异常值影响全局
+    // 创建临时副本用于排序
+    std::vector<T> min_sorted = min;
+    std::vector<T> max_sorted = max;
+    std::sort(min_sorted.begin(), min_sorted.end());
+    std::sort(max_sorted.begin(), max_sorted.end());
+
+    // 使用中位数初始化（如果steps为偶数，使用中间两个值的平均）
+    T res_min = (steps % 2 == 1) ? min_sorted[steps / 2]
+                                  : T(0.5) * (min_sorted[steps / 2 - 1] + min_sorted[steps / 2]);
+    T res_max = (steps % 2 == 1) ? max_sorted[steps / 2]
+                                  : T(0.5) * (max_sorted[steps / 2 - 1] + max_sorted[steps / 2]);
+
+    for (int t = 0; t < steps; ++t) {
+#ifdef DEBUG
+        // 增加调试信息: 输出res_min, res_max, min[t], max[t]
+        printf("[DEBUG][%s][Step %d] res_min = %.8f, res_max = %.8f, min[t] = %.8f, max[t] = %.8f\n",
+               name.c_str(), t, static_cast<double>(res_min), static_cast<double>(res_max),
+               static_cast<double>(min[t]), static_cast<double>(max[t]));
+#endif
+        // 平滑更新
+        res_min = 0.9 * res_min + 0.1 * min[t];
+        res_max = 0.9 * res_max + 0.1 * max[t];
+
+        //        res_min = std::min(res_min, min[t]);
+        //        res_max = std::max(res_max, max[t]);
     }
 
     calibrateQuantParams<T, QuantT>(res_min, res_max, use_symmetric, res_min, res_max, exp2_inv, zp, name);
@@ -879,6 +741,7 @@ void printParms(const GRUQuantitativeParameters &quant_parms) {
            quant_parms.exp2_inv_old_contrib_,
            quant_parms.zp_old_contrib_);
 }
+
 template<typename T, typename QuantT>
 void calculateScaleFromV(const std::vector<T> &h_host,
                          const T *v_dev,
@@ -1076,7 +939,7 @@ void calculateGRUQuantitativeParameters(const int steps,
     calculateScaleFromV<T, QuantT>(h_host, v, steps, hidden_size, batch_size, quant_parms_);
 
 #ifdef DEBUG
-    std::vector<T> x_host = d2h(x, NH * steps);
+    std::vector<T> x_host = d2h(x, batch_size * input_size * steps);
     checkScale<T, QuantT>(x_host,
                           quant_parms_.exp2_inv_x_,
                           quant_parms_.zp_x_,

@@ -8,6 +8,8 @@
 
 #include "devVector.h"
 
+//#define DEBUG
+
 template<typename T>
 struct GRUQuantitativeParametersInCalibration {
     dev::vector<T> z_pres_;
@@ -145,11 +147,11 @@ void GruQuantInit(
     const int batch_size,
     const int input_size,
     const int hidden_size,
-    const float *W,     // 输入到隐藏层的权重矩阵. [input_size, hidden_size * 3] 对应三个门
-    const float *R,     // 隐藏层到隐藏层的循环权重矩阵
-    const float *bx,    // 输入偏置项（input bias），来自输入路径
-    const float *br,    // 循环偏置项（recurrent bias），来自循环路径
-    const float *x,     // 输入序列张量
+    const float *W, // 输入到隐藏层的权重矩阵. [input_size, hidden_size * 3] 对应三个门
+    const float *R, // 隐藏层到隐藏层的循环权重矩阵
+    const float *bx,// 输入偏置项（input bias），来自输入路径
+    const float *br,// 循环偏置项（recurrent bias），来自循环路径
+    const float *x, // 输入序列张量
     QuantT *W_quant,
     QuantT *R_quant,
     int32_t *bx_quant,
@@ -178,17 +180,17 @@ void generate_int8_lut_from_exp2_inv(int32_t exp2_inv_z_pre,
 // 其中 quant_min 和 quant_max 由量化类型 QuantT 决定
 template<typename QuantT>
 void generate_piecewise_linear_lut_from_exp2_inv(int32_t exp2_inv_z_pre,
-                                                  int32_t zp_z_pre,
-                                                  int32_t exp2_inv_z_out,
-                                                  int32_t zp_z_out,
-                                                  int32_t exp2_inv_r_pre,
-                                                  int32_t zp_r_pre,
-                                                  int32_t exp2_inv_r_out,
-                                                  int32_t zp_r_out,
-                                                  int32_t exp2_inv_g_pre,
-                                                  int32_t zp_g_pre,
-                                                  int32_t exp2_inv_g_out,
-                                                  int32_t zp_g_out);
+                                                 int32_t zp_z_pre,
+                                                 int32_t exp2_inv_z_out,
+                                                 int32_t zp_z_out,
+                                                 int32_t exp2_inv_r_pre,
+                                                 int32_t zp_r_pre,
+                                                 int32_t exp2_inv_r_out,
+                                                 int32_t zp_r_out,
+                                                 int32_t exp2_inv_g_pre,
+                                                 int32_t zp_g_pre,
+                                                 int32_t exp2_inv_g_out,
+                                                 int32_t zp_g_out);
 
 
 __host__ __device__ __forceinline__ int32_t rshift_round(int32_t x, int n) {
@@ -560,20 +562,18 @@ inline int32_t selectBestExp2InvSym(const float orig_min, const float orig_max,
     return best_exp2;
 }
 
-//#define DEBUG true
-
 /**
  * @brief 模板化量化参数计算函数：支持任意量化类型（int8/int6等）和输入范围类型，对齐2的负n次方缩放因子
  * @tparam T 输入范围数据类型（如float、double，需支持算术运算和std::log2）
- * @tparam QuantT 量化目标类型（如int8_t、int6_t，必须是有符号整数类型）
+ * @tparam QuantT 量化目标类型（如int8_t、uint8_t、int16_t、uint16_t等）
  * @param[in] orig_min 原始数据最小值（输入，类型T）
  * @param[in] orig_max 原始数据最大值（输入，类型T）
  * @param[in] is_symmetric 是否使用对称量化（true=对称，false=非对称）
  * @param[out] exp2_inv 缩放因子指数（scale = 2^(-exp2_inv)），非负int32_t
  * @param[out] aligned_min 对齐后的最小值（输出，类型T）
  * @param[out] aligned_max 对齐后的最大值（输出，类型T）
- * @param[out] zp 量化零点（zero point），类型与QuantT一致，对称量化时固定为0
- * @note 1. 模板约束：QuantT必须是有符号整数类型（如int8_t、int6_t），T必须是浮点类型（float/double）；
+ * @param[out] zp 量化零点（zero point），类型为int32_t，对称量化时固定为0
+ * @note 1. 模板约束：QuantT必须是整数类型（有符号或无符号），T必须是浮点类型（float/double）；
  *       2. 缩放因子严格为2的负n次方（scale ∈ (0, 1]），exp2_inv ≥ 0；
  *       3. 对称量化：zp=0，对齐范围尽可能关于原点对称，覆盖原始min/max；
  *       4. 非对称量化：zp为QuantT类型整数，对齐范围覆盖原始min/max，满足 (aligned_max - aligned_min) = scale × (quant_max - quant_min)；
@@ -636,7 +636,7 @@ inline void calibrateQuantParams(
     // 可选调试打印
 #ifdef DEBUG
     if (!name.empty() && name == "scale_x") {
-        std::cout << "[QuantParam][" << name << "] "
+        std::cout << "[DEBUG][QuantParam][" << name << "] "
                   << "orig_min=" << orig_min << ", orig_max=" << orig_max
                   << ", aligned_min=" << aligned_min << ", aligned_max=" << aligned_max
                   << ", scale=" << scale
@@ -845,8 +845,7 @@ void init_sigmoid_z_lut_int8(
     int8_t shift_bits_y,
     int8_t zp_y,
     float x_min = -6.0f,
-    float x_max = 6.0f
-);
+    float x_max = 6.0f);
 
 void init_sigmoid_r_lut_int8(
     int8_t shift_bits_x,
@@ -854,8 +853,7 @@ void init_sigmoid_r_lut_int8(
     int8_t shift_bits_y,
     int8_t zp_y,
     float x_min = -6.0f,
-    float x_max = 6.0f
-);
+    float x_max = 6.0f);
 
 void init_tanh_lut_int8(
     int8_t shift_bits_x,
@@ -863,8 +861,7 @@ void init_tanh_lut_int8(
     int8_t shift_bits_y,
     int8_t zp_y,
     float x_min = -6.0f,
-    float x_max = 6.0f
-);
+    float x_max = 6.0f);
 
 void init_tanh_lut_int16(
     int8_t shift_bits_x,
@@ -872,8 +869,7 @@ void init_tanh_lut_int16(
     int8_t shift_bits_y,
     int16_t zp_y,
     float x_min = -6.0f,
-    float x_max = 6.0f
-);
+    float x_max = 6.0f);
 
 // 初始化 LUT（将数据复制到 CUDA 常量内存，INT16 版本 - r 门）
 void init_sigmoid_r_lut_int16(
@@ -882,8 +878,7 @@ void init_sigmoid_r_lut_int16(
     int8_t shift_bits_y,
     int16_t zp_y,
     float x_min = -6.0f,
-    float x_max = 6.0f
-);
+    float x_max = 6.0f);
 
 // 初始化 LUT（将数据复制到 CUDA 常量内存，INT16 版本 - z 门）
 void init_sigmoid_z_lut_int16(
@@ -892,5 +887,4 @@ void init_sigmoid_z_lut_int16(
     int8_t shift_bits_y,
     int16_t zp_y,
     float x_min = -6.0f,
-    float x_max = 6.0f
-);
+    float x_max = 6.0f);
