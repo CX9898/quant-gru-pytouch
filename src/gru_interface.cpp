@@ -468,5 +468,13 @@ void initialize_quantization_lut(const GRUQuantitativeParameters &quant_params, 
             quant_params.exp2_inv_r_out_, quant_params.zp_r_out_,
             quant_params.exp2_inv_g_pre_, quant_params.zp_g_pre_,
             quant_params.exp2_inv_g_out_, quant_params.zp_g_out_);
+
+        generate_piecewise_linear_lut_from_exp2_inv<int8_t>(
+            quant_params.exp2_inv_z_pre_, quant_params.zp_z_pre_,
+            quant_params.exp2_inv_z_out_, quant_params.zp_z_out_,
+            quant_params.exp2_inv_r_pre_, quant_params.zp_r_pre_,
+            quant_params.exp2_inv_r_out_, quant_params.zp_r_out_,
+            quant_params.exp2_inv_g_pre_, quant_params.zp_g_pre_,
+            quant_params.exp2_inv_g_out_, quant_params.zp_g_out_);
     }
 }

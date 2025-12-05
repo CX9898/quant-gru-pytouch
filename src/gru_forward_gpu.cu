@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cublas_v2.h>
@@ -5,7 +6,6 @@
 #include <cuda_runtime_api.h>
 #include <tuple>
 #include <utility>
-#include <algorithm>
 #include <vector>
 
 #include "blas.h"
@@ -580,9 +580,9 @@ void calculateScalePerSteps(const T *x_dev,
 
     // 使用中位数初始化（如果steps为偶数，使用中间两个值的平均）
     T res_min = (steps % 2 == 1) ? min_sorted[steps / 2]
-                                  : T(0.5) * (min_sorted[steps / 2 - 1] + min_sorted[steps / 2]);
+                                 : T(0.5) * (min_sorted[steps / 2 - 1] + min_sorted[steps / 2]);
     T res_max = (steps % 2 == 1) ? max_sorted[steps / 2]
-                                  : T(0.5) * (max_sorted[steps / 2 - 1] + max_sorted[steps / 2]);
+                                 : T(0.5) * (max_sorted[steps / 2 - 1] + max_sorted[steps / 2]);
 
     for (int t = 0; t < steps; ++t) {
 #ifdef DEBUG

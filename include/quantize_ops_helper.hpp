@@ -10,16 +10,6 @@
 
 //#define DEBUG
 
-template<typename T>
-struct GRUQuantitativeParametersInCalibration {
-    dev::vector<T> z_pres_;
-    dev::vector<T> r_pres_;
-    dev::vector<T> g_pres_;
-    dev::vector<T> one_minus_update_;
-    dev::vector<T> new_contrib_;
-    dev::vector<T> old_contrib_;
-};
-
 // GRU 量化参数结构体：存储GRU网络量化过程中所有定点化/反量化所需的参数
 // 核心约束：所有缩放因子均以「2的负n次方」形式存储，exp2_inv_xxx 表示缩放因子 scale = 2^(-exp2_inv_xxx)
 // zp_xxx 表示量化零点（zero point），用于浮点数与整数的映射：量化值 q = round(x / scale + zp)，反量化 x = (q - zp) * scale
@@ -591,7 +581,6 @@ inline void calibrateQuantParams(
     int32_t &zp,
     const std::string &name = "") {
     static_assert(std::is_floating_point<T>::value, "T must be float or double");
-    static_assert(std::is_signed<QuantT>::value, "QuantT must be a signed integer type");
 
     // 量化类型的范围
     const int32_t quant_min = std::numeric_limits<QuantT>::min();
