@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "devVector.h"
-#include "quantize_bitwidth_config.hpp"  // 位宽配置支持
+#include "quantize_bitwidth_config.hpp"// 位宽配置支持
 
 //#define DEBUG
 
@@ -15,6 +15,9 @@
 // 核心约束：所有缩放因子均以「2的负n次方」形式存储，exp2_inv_xxx 表示缩放因子 scale = 2^(-exp2_inv_xxx)
 // zp_xxx 表示量化零点（zero point），用于浮点数与整数的映射：量化值 q = round(x / scale + zp)，反量化 x = (q - zp) * scale
 struct GRUQuantitativeParameters {
+    // 为每个算子独立配置量化位宽
+    OperatorQuantConfig bitwidth_config_;
+
     int hidden_;// channel = hidden * 3
     int32_t exp2_inv_x_;
     int32_t zp_x_;
@@ -61,10 +64,6 @@ struct GRUQuantitativeParameters {
     int32_t zp_new_contrib_;
     int32_t exp2_inv_old_contrib_;
     int32_t zp_old_contrib_;
-
-    // ========== 位宽配置 ==========
-    // 新增：为每个算子独立配置量化位宽
-    OperatorQuantConfig bitwidth_config_;
 };
 
 struct QuantGRUReScale {
