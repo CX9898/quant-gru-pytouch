@@ -1307,8 +1307,6 @@ void calculateScale(const std::vector<T> &data_host,
     calibrateQuantParams<T, QuantT>(min_val, max_val, use_symmetric, min_new, max_new, exp2_inv, zp, name);
 };
 
-
-
 template<typename T, typename QuantT>
 void calculateScale(const T *data_dev,
                     const size_t size,
@@ -1446,6 +1444,17 @@ template void calculateScale<float, int32_t>(const std::vector<float> &data_host
                                              int32_t &exp2_inv,
                                              int32_t &zp,
                                              const std::string &name);
+template void calculateScale<float, uint8_t>(const std::vector<float> &data_host,
+                                             const bool use_symmetric,
+                                             int32_t &exp2_inv,
+                                             int32_t &zp,
+                                             const std::string &name);
+template void calculateScale<float, uint16_t>(const std::vector<float> &data_host,
+                                             const bool use_symmetric,
+                                             int32_t &exp2_inv,
+                                             int32_t &zp,
+                                             const std::string &name);
+
 
 // 版本2: 设备指针输入
 template void calculateScale<float, int8_t>(const float *data_dev,
@@ -1512,6 +1521,16 @@ template void calculateScale<double, int8_t>(const std::vector<double> &data_hos
                                              int32_t &zp,
                                              const std::string &name);
 template void calculateScale<double, int16_t>(const std::vector<double> &data_host,
+                                              const bool use_symmetric,
+                                              int32_t &exp2_inv,
+                                              int32_t &zp,
+                                              const std::string &name);
+template void calculateScale<double, uint8_t>(const std::vector<double> &data_host,
+                                              const bool use_symmetric,
+                                              int32_t &exp2_inv,
+                                              int32_t &zp,
+                                              const std::string &name);
+template void calculateScale<double, uint16_t>(const std::vector<double> &data_host,
                                               const bool use_symmetric,
                                               int32_t &exp2_inv,
                                               int32_t &zp,
