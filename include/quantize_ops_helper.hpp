@@ -32,6 +32,10 @@ struct GRUQuantitativeParameters {
     std::vector<int32_t> exp2_inv_bx_;
     std::vector<int32_t> exp2_inv_br_;
 
+    // TODO: delete test
+    dev::vector<int32_t> exp2_inv_bx_dev_;
+    dev::vector<int32_t> exp2_inv_br_dev_;
+
     int32_t exp2_inv_z_pre_;
     int32_t zp_z_pre_;
     int32_t exp2_inv_r_pre_;
@@ -60,44 +64,7 @@ struct GRUQuantitativeParameters {
 
     // ========== 位宽配置 ==========
     // 新增：为每个算子独立配置量化位宽
-    OperatorQuantConfig bitwidth_config;
-
-    // 默认构造函数
-    GRUQuantitativeParameters() : hidden_(0), bitwidth_config() {}
-
-    // 获取指定算子的位宽信息
-    RuntimeBitWidthInfo getXBitWidthInfo() const {
-        return RuntimeBitWidthInfo::fromBitWidth(bitwidth_config.x_bitwidth);
-    }
-    RuntimeBitWidthInfo getHBitWidthInfo() const {
-        return RuntimeBitWidthInfo::fromBitWidth(bitwidth_config.h_bitwidth);
-    }
-    RuntimeBitWidthInfo getWBitWidthInfo() const {
-        return RuntimeBitWidthInfo::fromBitWidth(bitwidth_config.W_bitwidth);
-    }
-    RuntimeBitWidthInfo getRBitWidthInfo() const {
-        return RuntimeBitWidthInfo::fromBitWidth(bitwidth_config.R_bitwidth);
-    }
-
-    // 检查是否使用 INT16
-    bool useInt16() const {
-        return bitwidth_config.x_bitwidth == QuantBitWidth::INT16 ||
-               bitwidth_config.h_bitwidth == QuantBitWidth::INT16;
-    }
-
-    // 检查是否使用混合精度（不同算子使用不同位宽）
-    bool useMixedPrecision() const {
-        auto base = bitwidth_config.x_bitwidth;
-        return bitwidth_config.h_bitwidth != base ||
-               bitwidth_config.W_bitwidth != base ||
-               bitwidth_config.R_bitwidth != base ||
-               bitwidth_config.z_pre_bitwidth != base ||
-               bitwidth_config.z_out_bitwidth != base ||
-               bitwidth_config.r_pre_bitwidth != base ||
-               bitwidth_config.r_out_bitwidth != base ||
-               bitwidth_config.g_pre_bitwidth != base ||
-               bitwidth_config.g_out_bitwidth != base;
-    }
+    OperatorQuantConfig bitwidth_config_;
 };
 
 struct QuantGRUReScale {
