@@ -534,7 +534,15 @@ void printParms(const GRUQuantitativeParameters &quant_parms) {
            quant_parms.zp_old_contrib_);
 }
 
-template<typename T, typename QuantT>
+template<typename T,
+         typename ZT,              // 更新门 z 输出的量化类型
+         typename RT,              // 重置门 r 输出的量化类型
+         typename GT,              // 候选状态 g 输出的量化类型
+         typename RhAddBrT,        // Rh_add_br_g 的量化类型
+         typename rRhT,            // rRh_g 的量化类型
+         typename OneMinusUpdateT, // one_minus_update 的量化类型
+         typename NewContribT,     // new_contrib 的量化类型
+         typename OldContribT>     // old_contrib 的量化类型
 void calculateScaleFromV(const std::vector<T> &h_host,
                          const T *v_dev,
                          size_t steps,
@@ -584,54 +592,73 @@ void calculateScaleFromV(const std::vector<T> &h_host,
         }
     }
 
-    calculateScale<T, QuantT>(z_out, false, quant_parms.exp2_inv_z_out_, quant_parms.zp_z_out_, "scale_z_out");
+    calculateScale<T, ZT>(z_out, false, quant_parms.exp2_inv_z_out_, quant_parms.zp_z_out_, "scale_z_out");
+    calculateScale<T, RT>(r_out, false, quant_parms.exp2_inv_r_out_, quant_parms.zp_r_out_, "scale_r_out");
 
-    calculateScale<T, QuantT>(r_out, false, quant_parms.exp2_inv_r_out_, quant_parms.zp_r_out_, "scale_r_out");
-    calculateScale<T, QuantT>(g_out, true, quant_parms.exp2_inv_g_out_, quant_parms.zp_g_out_, "scale_g_out");
-    calculateScale<T, QuantT>(Rh_add_br_g,
-                              false,
-                              quant_parms.exp2_inv_Rh_add_br_,
-                              quant_parms.zp_Rh_add_br_,
-                              "scale_Rh_add_br_g");
-    calculateScale<T, QuantT>(rRh_g, false, quant_parms.exp2_inv_rRh_, quant_parms.zp_rRh_, "scale_rRh_g");
-    calculateScale<T, QuantT>(one_minus_update,
-                              false,
-                              quant_parms.exp2_inv_one_minus_update_,
-                              quant_parms.zp_one_minus_update_,
-                              "scale_one_minus_update");
-    calculateScale<T, QuantT>(new_contrib,
-                              false,
-                              quant_parms.exp2_inv_new_contrib_,
-                              quant_parms.zp_new_contrib_,
-                              "scale_new_contrib");
-    calculateScale<T, QuantT>(old_contrib,
-                              false,
-                              quant_parms.exp2_inv_old_contrib_,
-                              quant_parms.zp_old_contrib_,
-                              "scale_old_contrib");
+    calculateScale<T, GT>(g_out, true, quant_parms.exp2_inv_g_out_, quant_parms.zp_g_out_, "scale_g_out");
+    calculateScale<T, RhAddBrT>(Rh_add_br_g,
+                                false,
+                                quant_parms.exp2_inv_Rh_add_br_,
+                                quant_parms.zp_Rh_add_br_,
+                                "scale_Rh_add_br_g");
+    calculateScale<T, rRhT>(rRh_g, false, quant_parms.exp2_inv_rRh_, quant_parms.zp_rRh_, "scale_rRh_g");
+    calculateScale<T, OneMinusUpdateT>(one_minus_update,
+                                       false,
+                                       quant_parms.exp2_inv_one_minus_update_,
+                                       quant_parms.zp_one_minus_update_,
+                                       "scale_one_minus_update");
+    calculateScale<T, NewContribT>(new_contrib,
+                                   false,
+                                   quant_parms.exp2_inv_new_contrib_,
+                                   quant_parms.zp_new_contrib_,
+                                   "scale_new_contrib");
+    calculateScale<T, OldContribT>(old_contrib,
+                                   false,
+                                   quant_parms.exp2_inv_old_contrib_,
+                                   quant_parms.zp_old_contrib_,
+                                   "scale_old_contrib");
 
 #ifdef DEBUG
-    checkScale<T, QuantT>(z_out, quant_parms.exp2_inv_z_out_, quant_parms.zp_z_out_, "scale_z_out");
-    checkScale<T, QuantT>(r_out, quant_parms.exp2_inv_r_out_, quant_parms.zp_r_out_, "scale_r_out");
-    checkScale<T, QuantT>(g_out, quant_parms.exp2_inv_g_out_, quant_parms.zp_g_out_, "scale_g_out");
-    checkScale<T, QuantT>(Rh_add_br_g, quant_parms.exp2_inv_Rh_add_br_, quant_parms.zp_Rh_add_br_, "scale_Rh_add_br_g");
-    checkScale<T, QuantT>(rRh_g, quant_parms.exp2_inv_rRh_, quant_parms.zp_rRh_, "scale_rRh_g");
-    checkScale<T, QuantT>(one_minus_update,
-                          quant_parms.exp2_inv_one_minus_update_,
-                          quant_parms.zp_one_minus_update_,
-                          "scale_one_minus_update");
-    checkScale<T, QuantT>(new_contrib,
-                          quant_parms.exp2_inv_new_contrib_,
-                          quant_parms.zp_new_contrib_,
-                          "scale_new_contrib");
-    checkScale<T, QuantT>(old_contrib,
-                          quant_parms.exp2_inv_old_contrib_,
-                          quant_parms.zp_old_contrib_,
-                          "scale_old_contrib");
+    checkScale<T, ZT>(z_out, quant_parms.exp2_inv_z_out_, quant_parms.zp_z_out_, "scale_z_out");
+    checkScale<T, RT>(r_out, quant_parms.exp2_inv_r_out_, quant_parms.zp_r_out_, "scale_r_out");
+    checkScale<T, GT>(g_out, quant_parms.exp2_inv_g_out_, quant_parms.zp_g_out_, "scale_g_out");
+    checkScale<T, RhAddBrT>(Rh_add_br_g, quant_parms.exp2_inv_Rh_add_br_, quant_parms.zp_Rh_add_br_, "scale_Rh_add_br_g");
+    checkScale<T, rRhT>(rRh_g, quant_parms.exp2_inv_rRh_, quant_parms.zp_rRh_, "scale_rRh_g");
+    checkScale<T, OneMinusUpdateT>(one_minus_update,
+                                   quant_parms.exp2_inv_one_minus_update_,
+                                   quant_parms.zp_one_minus_update_,
+                                   "scale_one_minus_update");
+    checkScale<T, NewContribT>(new_contrib,
+                               quant_parms.exp2_inv_new_contrib_,
+                               quant_parms.zp_new_contrib_,
+                               "scale_new_contrib");
+    checkScale<T, OldContribT>(old_contrib,
+                               quant_parms.exp2_inv_old_contrib_,
+                               quant_parms.zp_old_contrib_,
+                               "scale_old_contrib");
 #endif
 }
 
-template<typename T, typename QuantT>
+template<typename T,
+         typename XT,              // 输入 x 的量化类型
+         typename HT,              // 隐藏状态 h 的量化类型
+         typename WT,              // 权重 W 的量化类型
+         typename RT,              // 循环权重 R 的量化类型
+         typename WxT,             // W*x 结果的量化类型
+         typename RhT,             // R*h 结果的量化类型
+         typename BxT,             // 输入偏置 bx 的量化类型
+         typename BrT,             // 循环偏置 br 的量化类型
+         typename ZPreT,           // 更新门预激活 z_pre 的量化类型
+         typename RPreT,           // 重置门预激活 r_pre 的量化类型
+         typename GPreT,           // 候选状态预激活 g_pre 的量化类型
+         typename ZOutT,           // 更新门输出 z_out 的量化类型
+         typename ROutT,           // 重置门输出 r_out 的量化类型
+         typename GOutT,           // 候选状态输出 g_out 的量化类型
+         typename RhAddBrT,        // Rh_add_br_g 的量化类型
+         typename rRhT,            // rRh_g 的量化类型
+         typename OneMinusUpdateT, // one_minus_update 的量化类型
+         typename NewContribT,     // new_contrib 的量化类型
+         typename OldContribT>     // old_contrib 的量化类型
 void calculateGRUQuantitativeParameters(const int steps,
                                         const int batch_size,
                                         const int hidden_size,
@@ -651,83 +678,84 @@ void calculateGRUQuantitativeParameters(const int steps,
                                         GRUQuantitativeParameters &quant_parms_) {
     const int NH = batch_size * hidden_size;
 
-    calculateScalePerSteps<T, QuantT>(x,
-                                      batch_size * input_size,
-                                      steps,
-                                      false,
-                                      quant_parms_.exp2_inv_x_,
-                                      quant_parms_.zp_x_,
-                                      "scale_x");
+    calculateScalePerSteps<T, XT>(x,
+                                  batch_size * input_size,
+                                  steps,
+                                  false,
+                                  quant_parms_.exp2_inv_x_,
+                                  quant_parms_.zp_x_,
+                                  "scale_x");
 
-    calculateScalePerSteps<T, QuantT>(h + NH,
-                                      NH,
-                                      steps,
-                                      false,
-                                      quant_parms_.exp2_inv_h_,
-                                      quant_parms_.zp_h_,
-                                      "scale_h");
+    calculateScalePerSteps<T, HT>(h + NH,
+                                  NH,
+                                  steps,
+                                  false,
+                                  quant_parms_.exp2_inv_h_,
+                                  quant_parms_.zp_h_,
+                                  "scale_h");
 
-    quant_parms_.exp2_inv_W_ = calculateScalesPerChannels<T, QuantT>(W,
-                                                                     hidden_size * 3,
-                                                                     input_size,
-                                                                     "scale_W");
-
-
-    quant_parms_.exp2_inv_R_ = calculateScalesPerChannels<T, QuantT>(R,
-                                                                     hidden_size * 3,
-                                                                     hidden_size,
-                                                                     "scale_R");
+    quant_parms_.exp2_inv_W_ = calculateScalesPerChannels<T, WT>(W,
+                                                                 hidden_size * 3,
+                                                                 input_size,
+                                                                 "scale_W");
 
 
-    calculateScale<T, QuantT>(tmp_Wx,
-                              steps * batch_size * hidden_size * 3,
-                              false,
-                              quant_parms_.exp2_inv_Wx_,
-                              quant_parms_.zp_Wx_,
-                              "scale_Wx");
+    quant_parms_.exp2_inv_R_ = calculateScalesPerChannels<T, RT>(R,
+                                                                 hidden_size * 3,
+                                                                 hidden_size,
+                                                                 "scale_R");
 
 
-    calculateScale<T, QuantT>(tmp_Rh,
-                              steps * batch_size * hidden_size * 3,
-                              false,
-                              quant_parms_.exp2_inv_Rh_,
-                              quant_parms_.zp_Rh_,
-                              "scale_Rh");
+    calculateScale<T, WxT>(tmp_Wx,
+                           steps * batch_size * hidden_size * 3,
+                           false,
+                           quant_parms_.exp2_inv_Wx_,
+                           quant_parms_.zp_Wx_,
+                           "scale_Wx");
 
 
-    quant_parms_.exp2_inv_bx_ = calculateScalesPerChannels<T, QuantT>(bx,
-                                                                      hidden_size * 3,
-                                                                      1,
-                                                                      "scale_bx");
+    calculateScale<T, RhT>(tmp_Rh,
+                           steps * batch_size * hidden_size * 3,
+                           false,
+                           quant_parms_.exp2_inv_Rh_,
+                           quant_parms_.zp_Rh_,
+                           "scale_Rh");
 
-    quant_parms_.exp2_inv_br_ = calculateScalesPerChannels<T, QuantT>(br,
-                                                                      hidden_size * 3,
-                                                                      1,
-                                                                      "scale_br");
 
-    calculateScale<T, QuantT>(z_pres_.data(),
-                              z_pres_.size(),
-                              false,
-                              quant_parms_.exp2_inv_z_pre_,
-                              quant_parms_.zp_z_pre_,
-                              "scale_z_pre");
+    quant_parms_.exp2_inv_bx_ = calculateScalesPerChannels<T, BxT>(bx,
+                                                                   hidden_size * 3,
+                                                                   1,
+                                                                   "scale_bx");
 
-    calculateScale<T, QuantT>(r_pres_.data(),
-                              r_pres_.size(),
-                              false,
-                              quant_parms_.exp2_inv_r_pre_,
-                              quant_parms_.zp_r_pre_,
-                              "scale_r_pre");
+    quant_parms_.exp2_inv_br_ = calculateScalesPerChannels<T, BrT>(br,
+                                                                   hidden_size * 3,
+                                                                   1,
+                                                                   "scale_br");
 
-    calculateScale<T, QuantT>(g_pres_.data(),
-                              g_pres_.size(),
-                              false,
-                              quant_parms_.exp2_inv_g_pre_,
-                              quant_parms_.zp_g_pre_,
-                              "scale_g_pre");
+    calculateScale<T, ZPreT>(z_pres_.data(),
+                             z_pres_.size(),
+                             false,
+                             quant_parms_.exp2_inv_z_pre_,
+                             quant_parms_.zp_z_pre_,
+                             "scale_z_pre");
+
+    calculateScale<T, RPreT>(r_pres_.data(),
+                             r_pres_.size(),
+                             false,
+                             quant_parms_.exp2_inv_r_pre_,
+                             quant_parms_.zp_r_pre_,
+                             "scale_r_pre");
+
+    calculateScale<T, GPreT>(g_pres_.data(),
+                             g_pres_.size(),
+                             false,
+                             quant_parms_.exp2_inv_g_pre_,
+                             quant_parms_.zp_g_pre_,
+                             "scale_g_pre");
 
     std::vector<T> h_host = d2h(h, NH * (steps + 1));
-    calculateScaleFromV<T, QuantT>(h_host, v, steps, hidden_size, batch_size, quant_parms_);
+    calculateScaleFromV<T, ZOutT, ROutT, GOutT, RhAddBrT, rRhT, OneMinusUpdateT, NewContribT, OldContribT>(
+        h_host, v, steps, hidden_size, batch_size, quant_parms_);
 
 #ifdef DEBUG
     std::vector<T> x_host = d2h(x, batch_size * input_size * steps);
@@ -871,9 +899,19 @@ void ForwardPass<T>::Run(
         cudaDeviceSynchronize();
         quant_parms_.hidden_ = data_->hidden_size;
         if (!use_int16_quant_) {
-            calculateGRUQuantitativeParameters<T, int8_t>(steps, batch_size, hidden_size, input_size, W, R, bx, br, x, h, v, tmp_Wx, tmp_Rh, z_pres_, r_pres_, g_pres_, quant_parms_);
+            calculateGRUQuantitativeParameters<T,
+                int8_t, int8_t, int8_t, int8_t, int8_t, int8_t, int8_t, int8_t,
+                int8_t, int8_t, int8_t, int8_t, int8_t, int8_t, int8_t, int8_t,
+                int8_t, int8_t, int8_t>(
+                steps, batch_size, hidden_size, input_size, W, R, bx, br, x, h, v,
+                tmp_Wx, tmp_Rh, z_pres_, r_pres_, g_pres_, quant_parms_);
         } else {
-            calculateGRUQuantitativeParameters<T, int16_t>(steps, batch_size, hidden_size, input_size, W, R, bx, br, x, h, v, tmp_Wx, tmp_Rh, z_pres_, r_pres_, g_pres_, quant_parms_);
+            calculateGRUQuantitativeParameters<T,
+                int16_t, int16_t, int16_t, int16_t, int16_t, int16_t, int16_t, int16_t,
+                int16_t, int16_t, int16_t, int16_t, int16_t, int16_t, int16_t, int16_t,
+                int16_t, int16_t, int16_t>(
+                steps, batch_size, hidden_size, input_size, W, R, bx, br, x, h, v,
+                tmp_Wx, tmp_Rh, z_pres_, r_pres_, g_pres_, quant_parms_);
         }
     }
 }
