@@ -134,10 +134,6 @@ struct QuantGRUReScale {
     int32_t n_old_contrib_div_h_;             // n16
     int32_t exp2_inv_old_contrib_div_h_;      // S16
 
-    // ========== 位宽配置 ==========
-    // 存储各算子的位宽信息，用于运行时分发
-    OperatorQuantConfig bitwidth_config;
-
     //test
     GRUQuantitativeParameters test;
 };

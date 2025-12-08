@@ -1,5 +1,3 @@
-#include <cstdint>
-#include <cstdio>
 #include <cublas_v2.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime_api.h>
@@ -9,7 +7,7 @@
 #include "devVector.h"
 #include "device_ptr.h"
 #include "gru_quant.h"
-#include "inline_ops.h"
+#include "quantize_bitwidth_config.hpp"
 #include "quantize_ops.cuh"
 #include "quantize_ops_helper.hpp"
 
@@ -294,12 +292,11 @@ __device__ __forceinline__ GT computeG(// New Gate
 
 template<typename ZT,      // 更新门 z 的类型
          typename GT,      // 候选状态 g 的类型
-         typename HInT,    // 输入隐藏状态的类型
-         typename HOutT>   // 输出隐藏状态的类型
-__device__ __forceinline__ HOutT computeH(// 最终h
+         typename HT>      // 隐藏状态的类型（输入输出相同）
+__device__ __forceinline__ HT computeH(// 最终h
     const ZT z,
     const GT g,
-    const HInT h_old,
+    const HT h_old,
     const QuantGRUReScale &rescale_params) {
     // cur_h_value = z * h[output_idx] + (1.0 - z) * g;
 
@@ -320,7 +317,7 @@ __device__ __forceinline__ HOutT computeH(// 最终h
         rshift_round(new_contrib - rescale_params.zp_new_contrib_, rescale_params.n_new_contrib_div_h_) +
         rescale_params.zp_h_;
 
-    const HOutT h = dev::clamp<HOutT>(h_i32);
+    const HT h = dev::clamp<HT>(h_i32);
 
     // const int row = blockDim.x * blockIdx.x + threadIdx.x; // 当前线程对应的隐藏单元
     // const int col = blockDim.y * blockIdx.y + threadIdx.y; // 当前线程对应的batch样本
@@ -372,10 +369,8 @@ __device__ __forceinline__ HOutT computeH(// 最终h
 template<typename ZT,           // 更新门 z 的类型
          typename RT,           // 重置门 r 的类型
          typename GT,           // 候选状态 g 的类型
-         typename HInT,         // 输入隐藏状态 h 的类型
-         typename HOutT,        // 输出隐藏状态 h_out 的类型
+         typename HT,           // 隐藏状态 h 的类型（输入和输出相同）
          typename VT,           // 内部分量 v 的类型
-         typename ZoneoutT,     // Zoneout 相关的类型
          bool Training, bool ApplyZoneout>
 __global__ void PointwiseOperationsQuant(
     const int batch_dim,                   // 批量大小
@@ -386,12 +381,12 @@ __global__ void PointwiseOperationsQuant(
     const int32_t *R_sum_mul_h_zp,         // hidden_size * 3
     const int32_t *bx,                     // 输入偏置, 包含bz, br, bh
     const int32_t *br,                     // 隐藏偏置, 包含bz, br, bh
-    const HInT *h,                         // 上一时间步隐藏状态
-    HOutT *h_out,                          // 当前时间步隐藏状态
+    const HT *h,                           // 上一时间步隐藏状态
+    HT *h_out,                             // 当前时间步隐藏状态
     VT *v,                                 // 保存内部分量用于反向传播
-    const ZoneoutT zoneout_prob,           // Zoneout概率
-    const ZoneoutT *zoneout_mask,          // 训练模式用
-    const QuantGRUReScale rescale_params) {// Zoneout mask (only used if ApplyZoneout==true)
+    const float zoneout_prob,              // Zoneout概率
+    const HT *zoneout_mask,                // Zoneout mask (only used if ApplyZoneout==true)
+    const QuantGRUReScale rescale_params) {
 
     /* 计算索引 */
     const int row = blockDim.x * blockIdx.x + threadIdx.x;// 当前线程对应的隐藏单元
@@ -462,7 +457,7 @@ __global__ void PointwiseOperationsQuant(
         v[base_v_idx + 3 * hidden_dim] = Rh_add_br_g;
     }
 
-    HOutT cur_h_value = computeH<ZT, GT, HInT, HOutT>(z, g, h[output_idx], rescale_params);
+    HT cur_h_value = computeH<ZT, GT, HT>(z, g, h[output_idx], rescale_params);
 
     /* 启用Zoneout, 对GRU 隐藏状态的随机保留 */
     // TODO: 支持量化
@@ -632,27 +627,135 @@ void ForwardPassQuant<QuantT>::IterateInternal(
 
     cudaStreamWaitEvent(stream1, event, 0);
 
-    if (training) {                        // 训练模式
-        if (zoneout_prob && zoneout_mask) {// 启用Zoneout, 对GRU 隐藏状态的随机保留
-            kernel::PointwiseOperationsQuant<QuantT, QuantT, QuantT, QuantT, QuantT, QuantT, QuantT, true, true><<<gridDim, blockDim, 0, stream1>>>(
-                batch_size, hidden_size, tmp_Wx, tmp_Rh, W_sum_mul_x_zp, R_sum_mul_h_zp, bx, br, h, h_out, v,
-                zoneout_prob, zoneout_mask, rescale_param_);
+    // 根据 bitwidth_config_ 选择 kernel 模板参数
+    // 使用模式匹配而非完全展开，避免模板膨胀（5^4 × 4 = 2500 个实例）
+    // 只支持常用配置：全 INT8、全 INT16、混合精度
+    const auto& cfg = bitwidth_config_;
+
+    // 辅助宏简化 kernel 调用（添加类型转换）
+    // 模板参数: ZT, RT, GT, HT, VT, Training, ApplyZoneout
+    #define LAUNCH_KERNEL(ZT, RT, GT, HT, TRAINING, ZONEOUT) \
+        kernel::PointwiseOperationsQuant<ZT, RT, GT, HT, HT, TRAINING, ZONEOUT> \
+            <<<gridDim, blockDim, 0, stream1>>>( \
+            batch_size, hidden_size, tmp_Wx, tmp_Rh, W_sum_mul_x_zp, R_sum_mul_h_zp, bx, br, \
+            reinterpret_cast<const HT*>(h), reinterpret_cast<HT*>(h_out), \
+            (TRAINING) ? reinterpret_cast<HT*>(v) : nullptr, \
+            (ZONEOUT) ? zoneout_prob : 0.0f, \
+            (ZONEOUT) ? reinterpret_cast<const HT*>(zoneout_mask) : nullptr, \
+            rescale_param_)
+
+    // 检测配置模式
+    auto isAllInt8 = [&cfg]() {
+        return cfg.z_out_bitwidth == QuantBitWidth::INT8 &&
+               cfg.r_out_bitwidth == QuantBitWidth::INT8 &&
+               cfg.g_out_bitwidth == QuantBitWidth::INT8 &&
+               cfg.h_bitwidth == QuantBitWidth::INT8;
+    };
+
+    auto isAllInt16 = [&cfg]() {
+        return cfg.z_out_bitwidth == QuantBitWidth::INT16 &&
+               cfg.r_out_bitwidth == QuantBitWidth::INT16 &&
+               cfg.g_out_bitwidth == QuantBitWidth::INT16 &&
+               cfg.h_bitwidth == QuantBitWidth::INT16;
+    };
+
+    // 混合精度：门用 INT8，候选状态用 INT16
+    auto isMixedPrecision = [&cfg]() {
+        return cfg.z_out_bitwidth == QuantBitWidth::INT8 &&
+               cfg.r_out_bitwidth == QuantBitWidth::INT8 &&
+               cfg.g_out_bitwidth == QuantBitWidth::INT16 &&
+               cfg.h_bitwidth == QuantBitWidth::INT8;
+    };
+
+    // INT8 + UINT8 sigmoid：sigmoid 输出（z/r）用 UINT8，其他用 INT8
+    // sigmoid 输出范围 [0,1]，使用 UINT8 [0,255] 更合适
+    auto isInt8WithUint8Sigmoid = [&cfg]() {
+        return cfg.z_out_bitwidth == QuantBitWidth::UINT8 &&
+               cfg.r_out_bitwidth == QuantBitWidth::UINT8 &&
+               cfg.g_out_bitwidth == QuantBitWidth::INT8 &&
+               cfg.h_bitwidth == QuantBitWidth::INT8;
+    };
+
+    const bool useZoneout = zoneout_prob && zoneout_mask;
+
+    if (isAllInt8()) {
+        // 全 INT8 配置（最常用）
+        if (training) {
+            if (useZoneout) {
+                LAUNCH_KERNEL(int8_t, int8_t, int8_t, int8_t, true, true);
+            } else {
+                LAUNCH_KERNEL(int8_t, int8_t, int8_t, int8_t, true, false);
+            }
         } else {
-            kernel::PointwiseOperationsQuant<QuantT, QuantT, QuantT, QuantT, QuantT, QuantT, QuantT, true, false><<<gridDim, blockDim, 0, stream1>>>(
-                batch_size, hidden_size, tmp_Wx, tmp_Rh, W_sum_mul_x_zp, R_sum_mul_h_zp, bx, br, h, h_out, v, 0.0f,
-                nullptr, rescale_param_);
+            if (useZoneout) {
+                LAUNCH_KERNEL(int8_t, int8_t, int8_t, int8_t, false, true);
+            } else {
+                LAUNCH_KERNEL(int8_t, int8_t, int8_t, int8_t, false, false);
+            }
         }
-    } else {// 推理模式
-        if (zoneout_prob && zoneout_mask) {
-            kernel::PointwiseOperationsQuant<QuantT, QuantT, QuantT, QuantT, QuantT, QuantT, QuantT, false, true><<<gridDim, blockDim, 0, stream1>>>(
-                batch_size, hidden_size, tmp_Wx, tmp_Rh, W_sum_mul_x_zp, R_sum_mul_h_zp, bx, br, h, h_out, nullptr,
-                zoneout_prob, zoneout_mask, rescale_param_);
+    } else if (isAllInt16()) {
+        // 全 INT16 配置
+        if (training) {
+            if (useZoneout) {
+                LAUNCH_KERNEL(int16_t, int16_t, int16_t, int16_t, true, true);
+            } else {
+                LAUNCH_KERNEL(int16_t, int16_t, int16_t, int16_t, true, false);
+            }
         } else {
-            kernel::PointwiseOperationsQuant<QuantT, QuantT, QuantT, QuantT, QuantT, QuantT, QuantT, false, false><<<gridDim, blockDim, 0, stream1>>>(
-                batch_size, hidden_size, tmp_Wx, tmp_Rh, W_sum_mul_x_zp, R_sum_mul_h_zp, bx, br, h, h_out, nullptr,
-                0.0f, nullptr, rescale_param_);
+            if (useZoneout) {
+                LAUNCH_KERNEL(int16_t, int16_t, int16_t, int16_t, false, true);
+            } else {
+                LAUNCH_KERNEL(int16_t, int16_t, int16_t, int16_t, false, false);
+            }
+        }
+    } else if (isMixedPrecision()) {
+        // 混合精度：z/r 用 INT8，g 用 INT16
+        if (training) {
+            if (useZoneout) {
+                LAUNCH_KERNEL(int8_t, int8_t, int16_t, int8_t, true, true);
+            } else {
+                LAUNCH_KERNEL(int8_t, int8_t, int16_t, int8_t, true, false);
+            }
+        } else {
+            if (useZoneout) {
+                LAUNCH_KERNEL(int8_t, int8_t, int16_t, int8_t, false, true);
+            } else {
+                LAUNCH_KERNEL(int8_t, int8_t, int16_t, int8_t, false, false);
+            }
+        }
+    } else if (isInt8WithUint8Sigmoid()) {
+        // INT8 + UINT8 sigmoid：sigmoid 输出（z/r）用 UINT8，tanh 和 h 用 INT8
+        if (training) {
+            if (useZoneout) {
+                LAUNCH_KERNEL(uint8_t, uint8_t, int8_t, int8_t, true, true);
+            } else {
+                LAUNCH_KERNEL(uint8_t, uint8_t, int8_t, int8_t, true, false);
+            }
+        } else {
+            if (useZoneout) {
+                LAUNCH_KERNEL(uint8_t, uint8_t, int8_t, int8_t, false, true);
+            } else {
+                LAUNCH_KERNEL(uint8_t, uint8_t, int8_t, int8_t, false, false);
+            }
+        }
+    } else {
+        // 回退到默认配置（根据 QuantT 模板参数）
+        if (training) {
+            if (useZoneout) {
+                LAUNCH_KERNEL(QuantT, QuantT, QuantT, QuantT, true, true);
+            } else {
+                LAUNCH_KERNEL(QuantT, QuantT, QuantT, QuantT, true, false);
+            }
+        } else {
+            if (useZoneout) {
+                LAUNCH_KERNEL(QuantT, QuantT, QuantT, QuantT, false, true);
+            } else {
+                LAUNCH_KERNEL(QuantT, QuantT, QuantT, QuantT, false, false);
+            }
         }
     }
+
+    #undef LAUNCH_KERNEL
 }
 
 template<typename T>
@@ -748,6 +851,9 @@ void ForwardPassQuant<T>::setRescaleParam(const GRUQuantitativeParameters &parms
     rescale_param_.test = parms;
     h2d(rescale_param_.test.exp2_inv_bx_dev_, parms.exp2_inv_bx_);
     h2d(rescale_param_.test.exp2_inv_br_dev_, parms.exp2_inv_br_);
+
+    // 保存位宽配置
+    bitwidth_config_ = parms.bitwidth_config_;
 }
 
 // C = input_size(输入维度), H = hidden_size(隐藏层维度),
