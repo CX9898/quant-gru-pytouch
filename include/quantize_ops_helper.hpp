@@ -53,13 +53,11 @@ struct GRUQuantitativeParameters {
     int32_t exp2_inv_g_out_;
     int32_t zp_g_out_;
 
-    int32_t exp2_inv_Rh_add_br_;
-    int32_t zp_Rh_add_br_;
+    int32_t exp2_inv_Rh_add_br_g_;
+    int32_t zp_Rh_add_br_g_;
     int32_t exp2_inv_rRh_;
     int32_t zp_rRh_;
 
-    int32_t exp2_inv_one_minus_update_;
-    int32_t zp_one_minus_update_;
     int32_t exp2_inv_new_contrib_;
     int32_t zp_new_contrib_;
     int32_t exp2_inv_old_contrib_;
@@ -81,13 +79,9 @@ struct QuantGRUReScale {
     int32_t zp_z_pre_;
     int32_t zp_z_out_;
     int32_t exp2_inv_Wx_div_z_pre_;
-    int32_t exp2_inv_Wx_div_z_;
     int32_t exp2_inv_Rh_div_z_pre_;
-    int32_t exp2_inv_Rh_div_z_;
     dev::vector<int32_t> n_bx_div_z_;
-    dev::vector<float> scale_bx_div_z_;
     dev::vector<int32_t> n_br_div_z_;
-    dev::vector<float> scale_br_div_z_;
 
     // r门
     int32_t zp_r_pre_;
@@ -95,44 +89,28 @@ struct QuantGRUReScale {
     int32_t exp2_inv_Wx_div_r_pre_;// n5
     int32_t exp2_inv_Rh_div_r_pre_;// n6
     dev::vector<int32_t> n_bx_div_r_;
-    dev::vector<float> scale_bx_div_r_;
     dev::vector<int32_t> n_br_div_r_;
-    dev::vector<float> scale_br_div_r_;
 
     // New Gate
     int32_t zp_g_pre_;
     int32_t zp_g_out_;
     int32_t n_Rh_div_Rh_add_br_;
-    int32_t exp2_inv_Rh_div_Rh_add_br_;
     dev::vector<int32_t> n_br_div_Rh_add_br_;// br 是 per-channel
-    dev::vector<float> scale_br_div_Rh_add_br_;
     int32_t zp_Rh_add_br_;
-    int32_t n_r_mul_Rh_add_br_div_rRh_;   // n9
-    int32_t exp2_inv_r_out_mul_h_div_rRh_;// S9
+    int32_t n_r_mul_Rh_add_br_div_rRh_;
     int32_t zp_rRh_;
-    int32_t n_Wx_div_g_pre_;        // n10
-    int32_t exp2_inv_Wx_div_g_pre_; // S10
-    int32_t n_rRh_div_g_pre_;       // n11
-    int32_t exp2_inv_rRh_div_g_pre_;// S11
+    int32_t n_Wx_div_g_pre_;
+    int32_t n_rRh_div_g_pre_;
     dev::vector<int32_t> exp2_inv_bx_div_g_pre_;
-    dev::vector<float> scale_bx_div_g_pre_;
 
     // h_new
-    int32_t one_div_one_minus_update_;
-    int32_t n_z_out_div_one_minus_update_;       // n12
-    int32_t exp2_inv_z_out_div_one_minus_update_;// S12
-    int32_t zp_one_minus_update_;
-
     int32_t zp_new_contrib_;
-    int32_t n_one_minus_update_mul_g_div_new_contrib_;       // n13
-    int32_t exp2_inv_one_minus_update_mul_g_div_new_contrib_;// S13
+    int32_t one_in_z_scale_;           // 1 在 z_out scale 下的量化值 = 2^exp2_inv_z_out
+    int32_t n_z_mul_g_div_new_contrib_;// (z * g) 到 new_contrib 的 scale 转换
     int32_t zp_old_contrib_;
-    int32_t n_z_mul_h_div_old_contrib_;       // n14
-    int32_t exp2_inv_z_mul_h_div_old_contrib_;// S14
-    int32_t n_new_contrib_div_h_;             // n15
-    int32_t exp2_inv_new_contrib_div_h_;      // S15
-    int32_t n_old_contrib_div_h_;             // n16
-    int32_t exp2_inv_old_contrib_div_h_;      // S16
+    int32_t n_z_mul_h_div_old_contrib_;
+    int32_t n_new_contrib_div_h_;
+    int32_t n_old_contrib_div_h_;
 
     //test
     GRUQuantitativeParameters test;

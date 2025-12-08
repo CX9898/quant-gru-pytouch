@@ -520,13 +520,10 @@ void printParms(const GRUQuantitativeParameters &quant_parms) {
            quant_parms.exp2_inv_r_out_, quant_parms.zp_r_out_);
     printf("  exp2_inv_g_out_ = %d, zp_g_out_ = %d\n",
            quant_parms.exp2_inv_g_out_, quant_parms.zp_g_out_);
-    printf("  exp2_inv_Rh_add_br_ = %d, zp_Rh_add_br_ = %d\n",
-           quant_parms.exp2_inv_Rh_add_br_, quant_parms.zp_Rh_add_br_);
+    printf("  exp2_inv_Rh_add_br_g_ = %d, zp_Rh_add_br_g_ = %d\n",
+           quant_parms.exp2_inv_Rh_add_br_g_, quant_parms.zp_Rh_add_br_g_);
     printf("  exp2_inv_rRh_ = %d, zp_rRh_ = %d\n",
            quant_parms.exp2_inv_rRh_, quant_parms.zp_rRh_);
-    printf("  exp2_inv_one_minus_update_ = %d, zp_one_minus_update_ = %d\n",
-           quant_parms.exp2_inv_one_minus_update_,
-           quant_parms.zp_one_minus_update_);
     printf("  exp2_inv_new_contrib_ = %d, zp_new_contrib_ = %d\n",
            quant_parms.exp2_inv_new_contrib_,
            quant_parms.zp_new_contrib_);
@@ -551,7 +548,6 @@ void calculateScaleFromV(const std::vector<T> &h_host,
     std::vector<T> g_out(output_size);
     std::vector<T> Rh_add_br_g(output_size);
     std::vector<T> rRh_g(output_size);
-    std::vector<T> one_minus_update(output_size);
     std::vector<T> new_contrib(output_size);
     std::vector<T> old_contrib(output_size);
 
@@ -579,7 +575,6 @@ void calculateScaleFromV(const std::vector<T> &h_host,
                 g_out[offset_h] = g_val;
                 Rh_add_br_g[offset_h] = Rh_add_br_g_val;
                 rRh_g[offset_h] = rRh_g_val;
-                one_minus_update[offset_h] = one_minus_update_val;
                 new_contrib[offset_h] = new_contrib_val;
                 old_contrib[offset_h] = old_contrib_val;
             }
@@ -606,19 +601,13 @@ void calculateScaleFromV(const std::vector<T> &h_host,
 
     dispatchByBitWidth(cfg.Rh_add_br_bitwidth, [&](auto tag) {
         using RhAddBrT = typename decltype(tag)::type;
-        calculateScale<T, RhAddBrT>(Rh_add_br_g, false, quant_parms.exp2_inv_Rh_add_br_,
-                                    quant_parms.zp_Rh_add_br_, "scale_Rh_add_br_g");
+        calculateScale<T, RhAddBrT>(Rh_add_br_g, false, quant_parms.exp2_inv_Rh_add_br_g_,
+                                    quant_parms.zp_Rh_add_br_g_, "scale_Rh_add_br_g");
     });
 
     dispatchByBitWidth(cfg.rRh_bitwidth, [&](auto tag) {
         using rRhT = typename decltype(tag)::type;
         calculateScale<T, rRhT>(rRh_g, false, quant_parms.exp2_inv_rRh_, quant_parms.zp_rRh_, "scale_rRh_g");
-    });
-
-    dispatchByBitWidth(cfg.one_minus_update_bitwidth, [&](auto tag) {
-        using OneMinusUpdateT = typename decltype(tag)::type;
-        calculateScale<T, OneMinusUpdateT>(one_minus_update, false, quant_parms.exp2_inv_one_minus_update_,
-                                           quant_parms.zp_one_minus_update_, "scale_one_minus_update");
     });
 
     dispatchByBitWidth(cfg.new_contrib_bitwidth, [&](auto tag) {
@@ -648,7 +637,7 @@ void calculateScaleFromV(const std::vector<T> &h_host,
     });
     dispatchByBitWidth(cfg.Rh_add_br_bitwidth, [&](auto tag) {
         using RhAddBrT = typename decltype(tag)::type;
-        checkScale<T, RhAddBrT>(Rh_add_br_g, quant_parms.exp2_inv_Rh_add_br_, quant_parms.zp_Rh_add_br_, "scale_Rh_add_br_g");
+        checkScale<T, RhAddBrT>(Rh_add_br_g, quant_parms.exp2_inv_Rh_add_br_g_, quant_parms.zp_Rh_add_br_g_, "scale_Rh_add_br_g");
     });
     dispatchByBitWidth(cfg.rRh_bitwidth, [&](auto tag) {
         using rRhT = typename decltype(tag)::type;

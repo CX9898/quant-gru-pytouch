@@ -293,7 +293,7 @@ void quantGRUForward(bool is_training,// 是否开启训练模式，true为训�
                                quant_parms.exp2_inv_z_out_, quant_parms.zp_z_out_,
                                quant_parms.exp2_inv_r_out_, quant_parms.zp_r_out_,
                                quant_parms.exp2_inv_g_out_, quant_parms.zp_g_out_,
-                               quant_parms.exp2_inv_Rh_add_br_, quant_parms.zp_Rh_add_br_);
+                               quant_parms.exp2_inv_Rh_add_br_g_, quant_parms.zp_Rh_add_br_g_);
     }
 }
 
