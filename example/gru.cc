@@ -64,7 +64,6 @@ void GruInferenceQuant(const int time_steps, const int batch_size, const int inp
                        std::vector<float> &h_out  // (time_steps + 1) * batch_size * hidden_size
 ) {
     dev::vector<float> x_dev(x);
-
     dev::vector<float> h_dev((time_steps + 1) * batch_size * hidden_size);
 
     dev::vector<QuantT> W_quant_dev(W.size());
