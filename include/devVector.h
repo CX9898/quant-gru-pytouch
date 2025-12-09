@@ -40,7 +40,6 @@ class vector {
     T *cend() const;
     T *end();
     T *back() const;
-    T back_data() const;
 
    private:
     size_t size_;
@@ -68,6 +67,7 @@ inline vector<T>::vector(size_t size, T value) {
     cudaMalloc(reinterpret_cast<void **>(&data_), size * sizeof(T));
     if (!data_) {
         fprintf(stderr, "dev::vector: Device memory allocation failed\n");
+        return;
     }
     cudaMemset(data_, value, sizeof(T) * size_);
 }
@@ -172,15 +172,6 @@ inline T *vector<T>::back() const {
         return nullptr;
     }
     return data_ + size_ - 1;
-}
-template <typename T>
-inline T vector<T>::back_data() const {
-    if (!data_) {
-        return 0;
-    }
-    T *val = (T *)malloc(sizeof(T));
-    cudaMemcpy(val, data_ + size_ - 1, sizeof(T), cudaMemcpyDeviceToHost);
-    return *val;
 }
 
 }  // namespace dev
