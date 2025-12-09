@@ -17,6 +17,8 @@
 // 前向声明
 struct SigmoidLUT_INT16;
 struct SigmoidLUT_INT8;
+struct TanhLUT_INT16;
+struct TanhLUT_INT8;
 
 __constant__ int8_t d_sigmoid_int8_z_lut[256];
 __constant__ int8_t d_sigmoid_int8_r_lut[256];
@@ -27,12 +29,15 @@ __constant__ uint8_t d_sigmoid_uint8_z_lut[256];
 __constant__ uint8_t d_sigmoid_uint8_r_lut[256];
 
 // 分段线性量化常量内存
-__constant__ SigmoidLUT_INT16 d_sigmoid_z_lut_int16;// z 门的 Sigmoid LUT
-__constant__ SigmoidLUT_INT16 d_sigmoid_r_lut_int16;// r 门的 Sigmoid LUT
-__constant__ SigmoidLUT_INT16 d_tanh_lut_int16;
-__constant__ SigmoidLUT_INT8 d_sigmoid_z_lut_int8;// z 门的 Sigmoid LUT
-__constant__ SigmoidLUT_INT8 d_sigmoid_r_lut_int8;// r 门的 Sigmoid LUT
-__constant__ SigmoidLUT_INT8 d_tanh_lut_int8;
+// Sigmoid LUT（z/r 门）- 输入 int，输出 uint
+__constant__ SigmoidLUT_INT16 d_sigmoid_z_lut_int16;
+__constant__ SigmoidLUT_INT16 d_sigmoid_r_lut_int16;
+__constant__ SigmoidLUT_INT8 d_sigmoid_z_lut_int8;
+__constant__ SigmoidLUT_INT8 d_sigmoid_r_lut_int8;
+
+// Tanh LUT（g 门）- 输入 int，输出 int
+__constant__ TanhLUT_INT16 d_tanh_lut_int16;
+__constant__ TanhLUT_INT8 d_tanh_lut_int8;
 
 std::vector<int8_t> generate_sigmoid_int8_lut(float scale_z_pre, int zp_z_pre,
                                               float scale_z, int zp_z) {
@@ -240,23 +245,19 @@ void generate_int8_lut_from_exp2_inv(int32_t exp2_inv_z_pre, int32_t zp_z_pre,
                        sizeof(int8_t) * 256);
 }
 
-// 生成分段线性量化表（基于exp2_inv参数，支持模板类型）
-// exp2_inv 就是 shift_bits（因为 scale = 2^(-exp2_inv) = 2^(-shift_bits)）
-template<typename QuantT>
-void generate_piecewise_linear_lut_from_exp2_inv(int32_t exp2_inv_z_pre,
-                                                 int32_t zp_z_pre,
-                                                 int32_t exp2_inv_z_out,
-                                                 int32_t zp_z_out,
-                                                 int32_t exp2_inv_r_pre,
-                                                 int32_t zp_r_pre,
-                                                 int32_t exp2_inv_r_out,
-                                                 int32_t zp_r_out,
-                                                 int32_t exp2_inv_g_pre,
-                                                 int32_t zp_g_pre,
-                                                 int32_t exp2_inv_g_out,
-                                                 int32_t zp_g_out) {
-    // 从量化参数计算 min 和 max
-    // scale = 2^(-exp2_inv) = 1.0f / (1 << exp2_inv)
+// 生成分段线性量化表（基于 GRUQuantitativeParameters）
+// 根据 bitwidth_config_ 自动选择每个门的 LUT 类型
+// - z/r 门（sigmoid）输出是 uint8 或 uint16
+// - g 门（tanh）输出是 int8 或 int16
+void generate_piecewise_linear_lut_from_exp2_inv(const GRUQuantitativeParameters &params) {
+    const auto& cfg = params.bitwidth_config_;
+
+    // 辅助函数：判断是否为16位量化
+    auto is_16bit = [](QuantBitWidth bw) {
+        return bw == QuantBitWidth::INT16 || bw == QuantBitWidth::UINT16;
+    };
+
+    // 从量化参数计算 scale
     auto calculate_scale = [](int32_t exp2_inv) -> float {
         if (exp2_inv >= 0) {
             return 1.0f / static_cast<float>(1 << exp2_inv);
@@ -265,91 +266,88 @@ void generate_piecewise_linear_lut_from_exp2_inv(int32_t exp2_inv_z_pre,
         }
     };
 
-    // 🔥 关键修正：根据 Python 参考（u8.py, u16.py），非对称量化使用无符号整数范围
-    // 输入和输出使用无符号量化：[0, 2^bit_width - 1]
-    // 即使 QuantT 是 int8_t/int16_t，在计算输入/输出范围时也应使用对应的无符号范围
-    int32_t quant_min, quant_max;
-    if constexpr (std::is_same_v<QuantT, int8_t>) {
-        // 对于 int8_t，输入/输出使用 uint8_t 范围 [0, 255]
-        quant_min = 0;
-        quant_max = 255;
-    } else if constexpr (std::is_same_v<QuantT, int16_t>) {
-        // 对于 int16_t，输入/输出使用 uint16_t 范围 [0, 65535]
-        quant_min = 0;
-        quant_max = 65535;
+    // 判断每个门使用 8 位还是 16 位
+    bool z_use_16bit = is_16bit(cfg.z_out_bitwidth);
+    bool r_use_16bit = is_16bit(cfg.r_out_bitwidth);
+    bool g_use_16bit = is_16bit(cfg.g_out_bitwidth);
+
+    // 获取每个门的量化范围（sigmoid 输出是 uint，tanh 输出是 int）
+    // z 门：uint8 [0, 255] 或 uint16 [0, 65535]
+    int32_t z_quant_min = 0;
+    int32_t z_quant_max = z_use_16bit ? 65535 : 255;
+
+    // r 门：uint8 [0, 255] 或 uint16 [0, 65535]
+    int32_t r_quant_min = 0;
+    int32_t r_quant_max = r_use_16bit ? 65535 : 255;
+
+    // g 门（tanh）：int8 [-128, 127] 或 int16 [-32768, 32767]
+    int32_t g_quant_min = g_use_16bit ? -32768 : -128;
+    int32_t g_quant_max = g_use_16bit ? 32767 : 127;
+
+    // 计算每个门的输入范围
+    float scale_z_pre = calculate_scale(params.exp2_inv_z_pre_);
+    float x_min_z = static_cast<float>(z_quant_min - params.zp_z_pre_) * scale_z_pre;
+    float x_max_z = static_cast<float>(z_quant_max - params.zp_z_pre_) * scale_z_pre;
+
+    float scale_r_pre = calculate_scale(params.exp2_inv_r_pre_);
+    float x_min_r = static_cast<float>(r_quant_min - params.zp_r_pre_) * scale_r_pre;
+    float x_max_r = static_cast<float>(r_quant_max - params.zp_r_pre_) * scale_r_pre;
+
+    float scale_g_pre = calculate_scale(params.exp2_inv_g_pre_);
+    float x_min_g = static_cast<float>(g_quant_min - params.zp_g_pre_) * scale_g_pre;
+    float x_max_g = static_cast<float>(g_quant_max - params.zp_g_pre_) * scale_g_pre;
+
+    // 转换为 shift_bits
+    int8_t shift_bits_z_pre = static_cast<int8_t>(std::max(0, std::min(127, params.exp2_inv_z_pre_)));
+    int8_t shift_bits_z_out = static_cast<int8_t>(std::max(0, std::min(127, params.exp2_inv_z_out_)));
+    int8_t shift_bits_r_pre = static_cast<int8_t>(std::max(0, std::min(127, params.exp2_inv_r_pre_)));
+    int8_t shift_bits_r_out = static_cast<int8_t>(std::max(0, std::min(127, params.exp2_inv_r_out_)));
+    int8_t shift_bits_g_pre = static_cast<int8_t>(std::max(0, std::min(127, params.exp2_inv_g_pre_)));
+    int8_t shift_bits_g_out = static_cast<int8_t>(std::max(0, std::min(127, params.exp2_inv_g_out_)));
+
+    // ========== Z 门 LUT 初始化（sigmoid，输出 uint）==========
+    if (z_use_16bit) {
+        uint16_t zp_z_pre_quant = static_cast<uint16_t>(std::max(0, std::min(65535, params.zp_z_pre_)));
+        uint16_t zp_z_out_quant = static_cast<uint16_t>(std::max(0, std::min(65535, params.zp_z_out_)));
+        init_sigmoid_z_lut_int16(shift_bits_z_pre, static_cast<int16_t>(zp_z_pre_quant),
+                                 shift_bits_z_out, static_cast<int16_t>(zp_z_out_quant),
+                                 x_min_z, x_max_z);
     } else {
-        // 默认情况（不应该到达这里）
-        quant_min = 0;
-        quant_max = static_cast<int32_t>(std::numeric_limits<QuantT>::max());
+        uint8_t zp_z_pre_quant = static_cast<uint8_t>(std::max(0, std::min(255, params.zp_z_pre_)));
+        uint8_t zp_z_out_quant = static_cast<uint8_t>(std::max(0, std::min(255, params.zp_z_out_)));
+        init_sigmoid_z_lut_int8(shift_bits_z_pre, static_cast<int8_t>(zp_z_pre_quant),
+                                shift_bits_z_out, static_cast<int8_t>(zp_z_out_quant),
+                                x_min_z, x_max_z);
     }
 
-    // 计算每个门的输入范围（使用 pre 的量化参数）
-    // 公式：x = (q - zp) * scale，其中 q ∈ [quant_min, quant_max]
-    float scale_z_pre = calculate_scale(exp2_inv_z_pre);
-    float x_min_z = static_cast<float>(quant_min - zp_z_pre) * scale_z_pre;
-    float x_max_z = static_cast<float>(quant_max - zp_z_pre) * scale_z_pre;
-
-    float scale_r_pre = calculate_scale(exp2_inv_r_pre);
-    float x_min_r = static_cast<float>(quant_min - zp_r_pre) * scale_r_pre;
-    float x_max_r = static_cast<float>(quant_max - zp_r_pre) * scale_r_pre;
-
-    float scale_g_pre = calculate_scale(exp2_inv_g_pre);
-    float x_min_g = static_cast<float>(quant_min - zp_g_pre) * scale_g_pre;
-    float x_max_g = static_cast<float>(quant_max - zp_g_pre) * scale_g_pre;
-
-    // 将 exp2_inv 转换为 shift_bits（它们实际上是相同的）
-    // shift_bits 始终是 int8_t 类型
-    int8_t shift_bits_z_pre = static_cast<int8_t>(std::max(0, std::min(127, static_cast<int>(exp2_inv_z_pre))));
-    int8_t shift_bits_z_out = static_cast<int8_t>(std::max(0, std::min(127, static_cast<int>(exp2_inv_z_out))));
-    int8_t shift_bits_r_pre = static_cast<int8_t>(std::max(0, std::min(127, static_cast<int>(exp2_inv_r_pre))));
-    int8_t shift_bits_r_out = static_cast<int8_t>(std::max(0, std::min(127, static_cast<int>(exp2_inv_r_out))));
-    int8_t shift_bits_g_pre = static_cast<int8_t>(std::max(0, std::min(127, static_cast<int>(exp2_inv_g_pre))));
-    int8_t shift_bits_g_out = static_cast<int8_t>(std::max(0, std::min(127, static_cast<int>(exp2_inv_g_out))));
-
-    // 根据 QuantT 类型选择相应的 zp 类型和初始化函数
-    if constexpr (std::is_same_v<QuantT, int8_t>) {
-        // INT8 版本
-        int8_t zp_z_pre_quant = static_cast<int8_t>(std::max(-128, std::min(127, static_cast<int>(zp_z_pre))));
-        int8_t zp_z_out_quant = static_cast<int8_t>(std::max(-128, std::min(127, static_cast<int>(zp_z_out))));
-        int8_t zp_r_pre_quant = static_cast<int8_t>(std::max(-128, std::min(127, static_cast<int>(zp_r_pre))));
-        int8_t zp_r_out_quant = static_cast<int8_t>(std::max(-128, std::min(127, static_cast<int>(zp_r_out))));
-        int8_t zp_g_pre_quant = static_cast<int8_t>(std::max(-128, std::min(127, static_cast<int>(zp_g_pre))));
-        int8_t zp_g_out_quant = static_cast<int8_t>(std::max(-128, std::min(127, static_cast<int>(zp_g_out))));
-
-        init_sigmoid_z_lut_int8(shift_bits_z_pre, zp_z_pre_quant,
-                                shift_bits_z_out, zp_z_out_quant,
-                                x_min_z, x_max_z);
-
-        init_sigmoid_r_lut_int8(shift_bits_r_pre, zp_r_pre_quant,
-                                shift_bits_r_out, zp_r_out_quant,
-                                x_min_r, x_max_r);
-
-        init_tanh_lut_int8(shift_bits_g_pre, zp_g_pre_quant,
-                           shift_bits_g_out, zp_g_out_quant,
-                           x_min_g, x_max_g);
-    } else if constexpr (std::is_same_v<QuantT, int16_t>) {
-        // INT16 版本
-        int16_t zp_z_pre_quant = static_cast<int16_t>(std::max(-32768, std::min(32767, static_cast<int>(zp_z_pre))));
-        int16_t zp_z_out_quant = static_cast<int16_t>(std::max(-32768, std::min(32767, static_cast<int>(zp_z_out))));
-        int16_t zp_r_pre_quant = static_cast<int16_t>(std::max(-32768, std::min(32767, static_cast<int>(zp_r_pre))));
-        int16_t zp_r_out_quant = static_cast<int16_t>(std::max(-32768, std::min(32767, static_cast<int>(zp_r_out))));
-        int16_t zp_g_pre_quant = static_cast<int16_t>(std::max(-32768, std::min(32767, static_cast<int>(zp_g_pre))));
-        int16_t zp_g_out_quant = static_cast<int16_t>(std::max(-32768, std::min(32767, static_cast<int>(zp_g_out))));
-
-        init_sigmoid_z_lut_int16(shift_bits_z_pre, zp_z_pre_quant,
-                                 shift_bits_z_out, zp_z_out_quant,
-                                 x_min_z, x_max_z);
-
-        init_sigmoid_r_lut_int16(shift_bits_r_pre, zp_r_pre_quant,
-                                 shift_bits_r_out, zp_r_out_quant,
+    // ========== R 门 LUT 初始化（sigmoid，输出 uint）==========
+    if (r_use_16bit) {
+        uint16_t zp_r_pre_quant = static_cast<uint16_t>(std::max(0, std::min(65535, params.zp_r_pre_)));
+        uint16_t zp_r_out_quant = static_cast<uint16_t>(std::max(0, std::min(65535, params.zp_r_out_)));
+        init_sigmoid_r_lut_int16(shift_bits_r_pre, static_cast<int16_t>(zp_r_pre_quant),
+                                 shift_bits_r_out, static_cast<int16_t>(zp_r_out_quant),
                                  x_min_r, x_max_r);
+    } else {
+        uint8_t zp_r_pre_quant = static_cast<uint8_t>(std::max(0, std::min(255, params.zp_r_pre_)));
+        uint8_t zp_r_out_quant = static_cast<uint8_t>(std::max(0, std::min(255, params.zp_r_out_)));
+        init_sigmoid_r_lut_int8(shift_bits_r_pre, static_cast<int8_t>(zp_r_pre_quant),
+                                shift_bits_r_out, static_cast<int8_t>(zp_r_out_quant),
+                                x_min_r, x_max_r);
+    }
 
+    // ========== G 门 LUT 初始化（tanh，输出 int）==========
+    if (g_use_16bit) {
+        int16_t zp_g_pre_quant = static_cast<int16_t>(std::max(-32768, std::min(32767, params.zp_g_pre_)));
+        int16_t zp_g_out_quant = static_cast<int16_t>(std::max(-32768, std::min(32767, params.zp_g_out_)));
         init_tanh_lut_int16(shift_bits_g_pre, zp_g_pre_quant,
                             shift_bits_g_out, zp_g_out_quant,
                             x_min_g, x_max_g);
     } else {
-        static_assert(std::is_same_v<QuantT, int8_t> || std::is_same_v<QuantT, int16_t>,
-                      "QuantT must be int8_t or int16_t");
+        int8_t zp_g_pre_quant = static_cast<int8_t>(std::max(-128, std::min(127, params.zp_g_pre_)));
+        int8_t zp_g_out_quant = static_cast<int8_t>(std::max(-128, std::min(127, params.zp_g_out_)));
+        init_tanh_lut_int8(shift_bits_g_pre, zp_g_pre_quant,
+                           shift_bits_g_out, zp_g_out_quant,
+                           x_min_g, x_max_g);
     }
 }
 
@@ -941,14 +939,15 @@ SigmoidLUT_INT16 generate_sigmoid_lut_int16(
 }
 
 // 生成 Tanh 分段线性拟合 LUT（主机端）
-SigmoidLUT_INT16 generate_tanh_lut_int16(
+// Tanh 输入 int16，输出 int16（有符号）
+TanhLUT_INT16 generate_tanh_lut_int16(
     int8_t shift_bits_x,
     int16_t zp_x,
     int8_t shift_bits_y,
     int16_t zp_y,
     float x_min,
     float x_max) {
-    SigmoidLUT_INT16 lut;
+    TanhLUT_INT16 lut;
     lut.shift_bits_x = shift_bits_x;
     lut.zp_x = zp_x;
     lut.shift_bits_y = shift_bits_y;
@@ -1070,11 +1069,11 @@ void init_tanh_lut_int16(
     int16_t zp_y,
     float x_min,
     float x_max) {
-    SigmoidLUT_INT16 lut = generate_tanh_lut_int16(
+    TanhLUT_INT16 lut = generate_tanh_lut_int16(
         shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
 
     cudaError_t err = cudaMemcpyToSymbol(
-        d_tanh_lut_int16, &lut, sizeof(SigmoidLUT_INT16));
+        d_tanh_lut_int16, &lut, sizeof(TanhLUT_INT16));
 
     if (err != cudaSuccess) {
         printf("Failed to copy tanh LUT to constant memory: %s\n",
@@ -1190,14 +1189,15 @@ SigmoidLUT_INT8 generate_sigmoid_lut_int8(
 }
 
 // 生成 Tanh 分段线性拟合 LUT（INT8 版本）
-SigmoidLUT_INT8 generate_tanh_lut_int8(
+// Tanh 输入 int8，输出 int8（有符号）
+TanhLUT_INT8 generate_tanh_lut_int8(
     int8_t shift_bits_x,
     int8_t zp_x,
     int8_t shift_bits_y,
     int8_t zp_y,
     float x_min,
     float x_max) {
-    SigmoidLUT_INT8 lut;
+    TanhLUT_INT8 lut;
     lut.shift_bits_x = shift_bits_x;
     lut.zp_x = zp_x;
     lut.shift_bits_y = shift_bits_y;
@@ -1321,11 +1321,11 @@ void init_tanh_lut_int8(
     int8_t zp_y,
     float x_min,
     float x_max) {
-    SigmoidLUT_INT8 lut = generate_tanh_lut_int8(
+    TanhLUT_INT8 lut = generate_tanh_lut_int8(
         shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
 
     cudaError_t err = cudaMemcpyToSymbol(
-        d_tanh_lut_int8, &lut, sizeof(SigmoidLUT_INT8));
+        d_tanh_lut_int8, &lut, sizeof(TanhLUT_INT8));
 
     if (err != cudaSuccess) {
         printf("Failed to copy tanh LUT (INT8) to constant memory: %s\n",
@@ -1333,22 +1333,6 @@ void init_tanh_lut_int8(
     }
 }
 
-// 显式实例化 generate_piecewise_linear_lut_from_exp2_inv 模板函数
-template void generate_piecewise_linear_lut_from_exp2_inv<int8_t>(
-    int32_t exp2_inv_z_pre, int32_t zp_z_pre,
-    int32_t exp2_inv_z_out, int32_t zp_z_out,
-    int32_t exp2_inv_r_pre, int32_t zp_r_pre,
-    int32_t exp2_inv_r_out, int32_t zp_r_out,
-    int32_t exp2_inv_g_pre, int32_t zp_g_pre,
-    int32_t exp2_inv_g_out, int32_t zp_g_out);
-
-template void generate_piecewise_linear_lut_from_exp2_inv<int16_t>(
-    int32_t exp2_inv_z_pre, int32_t zp_z_pre,
-    int32_t exp2_inv_z_out, int32_t zp_z_out,
-    int32_t exp2_inv_r_pre, int32_t zp_r_pre,
-    int32_t exp2_inv_r_out, int32_t zp_r_out,
-    int32_t exp2_inv_g_pre, int32_t zp_g_pre,
-    int32_t exp2_inv_g_out, int32_t zp_g_out);
 
 
 template<typename T, typename QuantT>

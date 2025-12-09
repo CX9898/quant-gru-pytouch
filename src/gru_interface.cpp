@@ -135,8 +135,8 @@ GRUQuantitativeParameters calibrateGruScalesAndInitLut(
         W, R, bx, br, x,
         g_blas_handle);
 
-    // 初始化 LUT 表（内部会根据 use_int16 自动选择方法）
-    initialize_quantization_lut(quant_params, use_int16);
+    // 初始化 LUT 表（根据 bitwidth_config 自动选择方法）
+    initialize_quantization_lut(quant_params);
 
     return quant_params;
 }
@@ -442,25 +442,25 @@ template void quantGRUForward<int16_t>(
     float *h,
     float *v);
 
+// 辅助函数：判断是否为16位量化
+inline bool is_16bit(QuantBitWidth bw) {
+    return bw == QuantBitWidth::INT16 || bw == QuantBitWidth::UINT16;
+}
+
 // 初始化量化 LUT 表（仅在初始化时调用一次）
-// 接收量化参数对象和量化类型，内部根据类型自动选择相应的 LUT 初始化方法
-// 支持 int8 和 int16，未来可扩展支持其他类型
-// 解耦实现细节，上层无需关注具体参数和初始化方法
-void initialize_quantization_lut(const GRUQuantitativeParameters &quant_params, bool use_int16) {
-    if (use_int16) {
-        // int16 使用分段线性量化表
-        // x_min 和 x_max 定义了 LUT 表的输入范围：
-        // 注意：虽然三个门使用相同的范围，但函数支持为每个门单独设置范围以提供灵活性
-        // 注意：模板参数使用 int16_t（表示16位量化），函数内部会自动处理无符号量化范围
-        generate_piecewise_linear_lut_from_exp2_inv<int16_t>(
-            quant_params.exp2_inv_z_pre_, quant_params.zp_z_pre_,
-            quant_params.exp2_inv_z_out_, quant_params.zp_z_out_,
-            quant_params.exp2_inv_r_pre_, quant_params.zp_r_pre_,
-            quant_params.exp2_inv_r_out_, quant_params.zp_r_out_,
-            quant_params.exp2_inv_g_pre_, quant_params.zp_g_pre_,
-            quant_params.exp2_inv_g_out_, quant_params.zp_g_out_);
-    } else {
-        // int8 使用传统的 LUT 表
+// 根据 OperatorQuantConfig 中每个门的 out_bitwidth 独立选择 LUT 类型
+void initialize_quantization_lut(const GRUQuantitativeParameters &quant_params) {
+    const auto& cfg = quant_params.bitwidth_config_;
+
+    // 生成分段线性 LUT（内部根据 bitwidth_config 自动选择每个门的类型）
+    generate_piecewise_linear_lut_from_exp2_inv(quant_params);
+
+    // 如果全部使用 8 位，还需要初始化传统的 int8 LUT 表
+    bool z_use_16bit = is_16bit(cfg.z_out_bitwidth);
+    bool r_use_16bit = is_16bit(cfg.r_out_bitwidth);
+    bool g_use_16bit = is_16bit(cfg.g_out_bitwidth);
+
+    if (!z_use_16bit && !r_use_16bit && !g_use_16bit) {
         generate_int8_lut_from_exp2_inv(
             quant_params.exp2_inv_z_pre_, quant_params.zp_z_pre_,
             quant_params.exp2_inv_z_out_, quant_params.zp_z_out_,
@@ -469,16 +469,7 @@ void initialize_quantization_lut(const GRUQuantitativeParameters &quant_params, 
             quant_params.exp2_inv_g_pre_, quant_params.zp_g_pre_,
             quant_params.exp2_inv_g_out_, quant_params.zp_g_out_);
 
-        generate_piecewise_linear_lut_from_exp2_inv<int8_t>(
-            quant_params.exp2_inv_z_pre_, quant_params.zp_z_pre_,
-            quant_params.exp2_inv_z_out_, quant_params.zp_z_out_,
-            quant_params.exp2_inv_r_pre_, quant_params.zp_r_pre_,
-            quant_params.exp2_inv_r_out_, quant_params.zp_r_out_,
-            quant_params.exp2_inv_g_pre_, quant_params.zp_g_pre_,
-            quant_params.exp2_inv_g_out_, quant_params.zp_g_out_);
-
         // 检查是否需要 uint8 sigmoid LUT（z/r 输出使用 UINT8）
-        const auto& cfg = quant_params.bitwidth_config_;
         if (cfg.z_out_bitwidth == QuantBitWidth::UINT8 ||
             cfg.r_out_bitwidth == QuantBitWidth::UINT8) {
             generate_uint8_lut_from_exp2_inv(

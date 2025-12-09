@@ -481,8 +481,8 @@ class CustomGRU(nn.GRU):
         )
         torch.cuda.synchronize()
 
-        # 初始化量化 LUT 表
-        gru_ops.initialize_quantization_lut(quant_params=self.quant_params, use_int16=use_int16)
+        # 初始化量化 LUT 表（根据 bitwidth_config 自动选择类型）
+        gru_ops.initialize_quantization_lut(quant_params=self.quant_params)
         torch.cuda.synchronize()
 
         # 确保权重连续性并重置 flatten_parameters 状态

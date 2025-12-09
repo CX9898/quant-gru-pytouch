@@ -111,6 +111,6 @@ void hasteGRUBackward(const int time_steps,
 );
 
 // 初始化量化 LUT 表（仅在初始化时调用一次）
-// 接收量化参数对象和量化类型，内部根据类型自动选择相应的 LUT 初始化方法
-// 支持 int8 和 int16，未来可扩展支持其他类型
-void initialize_quantization_lut(const GRUQuantitativeParameters &quant_params, bool use_int16);
+// 根据 OperatorQuantConfig 自动选择相应的 LUT 初始化方法
+// 支持 uint8 和 uint16，根据配置中的位宽自动选择
+void initialize_quantization_lut(const GRUQuantitativeParameters &quant_params);

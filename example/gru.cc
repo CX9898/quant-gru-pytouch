@@ -81,8 +81,7 @@ void GruInferenceQuant(
                                    W_quant_dev.data(), R_quant_dev.data(), bx_quant_dev.data(), br_quant_dev.data());
     }
     {
-        bool is_int16 = std::is_same_v<QuantT, int16_t> ? true : false;
-        initialize_quantization_lut(quant_parms, is_int16);
+        initialize_quantization_lut(quant_parms);
     }
     {
         ScopeTimer t("GruInferenceQuant:");
@@ -196,8 +195,7 @@ GRUTrainGradients GruTrainQuant(const int time_steps,
 
     // 生成LUT表
     {
-        bool is_int16 = std::is_same_v<QuantT, int16_t> ? true : false;
-        initialize_quantization_lut(quant_parms, is_int16);
+        initialize_quantization_lut(quant_parms);
     }
 
     const std::size_t h_size = (time_steps + 1) * batch_size * hidden_size;

@@ -14,6 +14,8 @@ extern __constant__ uint8_t d_sigmoid_uint8_r_lut[256];
 // ==================== 分段线性量化数据结构 ====================
 #define NUM_SEGMENTS 16
 
+// ==================== INT16 版本 ====================
+
 // INT16 版本的段参数结构
 struct SegmentParams_INT16 {
     int16_t q_b;                    // 量化后的系数 b (INT16)
@@ -22,39 +24,63 @@ struct SegmentParams_INT16 {
     uint16_t threshold;             // 段阈值 (UINT16，量化后的输入值)
 };
 
-// Sigmoid/Tanh 查找表结构（INT16）
+// Sigmoid 查找表结构（INT16）- 输入 int16，输出 uint16
 struct SigmoidLUT_INT16 {
     SegmentParams_INT16 segments[NUM_SEGMENTS];
-    int16_t zp_x;                   // 输入 zero-point (INT16)
-    int8_t shift_bits_x;             // 输入 shift_bits (INT8)
-    int8_t shift_bits_y;             // 输出 shift_bits (INT8)
-    int16_t zp_y;                   // 输出 zero-point (INT16)
+    int16_t zp_x;                   // 输入 zero-point (INT16，有符号)
+    int8_t shift_bits_x;            // 输入 shift_bits (INT8)
+    int8_t shift_bits_y;            // 输出 shift_bits (INT8)
+    uint16_t zp_y;                  // 输出 zero-point (UINT16，无符号)
 };
+
+// Tanh 查找表结构（INT16）- 输入 int16，输出 int16
+struct TanhLUT_INT16 {
+    SegmentParams_INT16 segments[NUM_SEGMENTS];
+    int16_t zp_x;                   // 输入 zero-point (INT16，有符号)
+    int8_t shift_bits_x;            // 输入 shift_bits (INT8)
+    int8_t shift_bits_y;            // 输出 shift_bits (INT8)
+    int16_t zp_y;                   // 输出 zero-point (INT16，有符号)
+};
+
+// ==================== INT8 版本 ====================
 
 // INT8 版本的段参数结构
 struct SegmentParams_INT8 {
-    int8_t q_b;                    // 量化后的系数 b (INT8)
+    int8_t q_b;                     // 量化后的系数 b (INT8)
     int8_t n_BX_total;              // 融合后的移位位数 (INT8，可能为负)
     int16_t term_c_precomputed;     // 预计算的 term_c (INT16)
-    uint8_t threshold;             // 段阈值 (UINT8，量化后的输入值)
+    uint8_t threshold;              // 段阈值 (UINT8，量化后的输入值)
 };
 
-// Sigmoid/Tanh 查找表结构（INT8）
+// Sigmoid 查找表结构（INT8）- 输入 int8，输出 uint8
 struct SigmoidLUT_INT8 {
     SegmentParams_INT8 segments[NUM_SEGMENTS];
-    int8_t zp_x;                   // 输入 zero-point (INT8)
-    int8_t shift_bits_x;             // 输入 shift_bits (INT8)
-    int8_t shift_bits_y;             // 输出 shift_bits (INT8)
-    int8_t zp_y;                   // 输出 zero-point (INT8)
+    int8_t zp_x;                    // 输入 zero-point (INT8，有符号)
+    int8_t shift_bits_x;            // 输入 shift_bits (INT8)
+    int8_t shift_bits_y;            // 输出 shift_bits (INT8)
+    uint8_t zp_y;                   // 输出 zero-point (UINT8，无符号)
 };
 
-// 常量内存声明（CUDA设备端）
-extern __constant__ SigmoidLUT_INT16 d_sigmoid_z_lut_int16;  // z 门的 Sigmoid LUT
-extern __constant__ SigmoidLUT_INT16 d_sigmoid_r_lut_int16;  // r 门的 Sigmoid LUT
-extern __constant__ SigmoidLUT_INT16 d_tanh_lut_int16;
-extern __constant__ SigmoidLUT_INT8 d_sigmoid_z_lut_int8;  // z 门的 Sigmoid LUT
-extern __constant__ SigmoidLUT_INT8 d_sigmoid_r_lut_int8;  // r 门的 Sigmoid LUT
-extern __constant__ SigmoidLUT_INT8 d_tanh_lut_int8;
+// Tanh 查找表结构（INT8）- 输入 int8，输出 int8
+struct TanhLUT_INT8 {
+    SegmentParams_INT8 segments[NUM_SEGMENTS];
+    int8_t zp_x;                    // 输入 zero-point (INT8，有符号)
+    int8_t shift_bits_x;            // 输入 shift_bits (INT8)
+    int8_t shift_bits_y;            // 输出 shift_bits (INT8)
+    int8_t zp_y;                    // 输出 zero-point (INT8，有符号)
+};
+
+// ==================== 常量内存声明（CUDA设备端）====================
+
+// Sigmoid LUT（z/r 门）- 输出无符号
+extern __constant__ SigmoidLUT_INT16 d_sigmoid_z_lut_int16;
+extern __constant__ SigmoidLUT_INT16 d_sigmoid_r_lut_int16;
+extern __constant__ SigmoidLUT_INT8 d_sigmoid_z_lut_int8;
+extern __constant__ SigmoidLUT_INT8 d_sigmoid_r_lut_int8;
+
+// Tanh LUT（g 门）- 输出有符号
+extern __constant__ TanhLUT_INT16 d_tanh_lut_int16;
+extern __constant__ TanhLUT_INT8 d_tanh_lut_int8;
 
 namespace dev {
 
@@ -262,17 +288,17 @@ __device__ __forceinline__ uint16_t sigmoid_piecewise_linear_int16(
     return static_cast<uint16_t>(q_y);
 }
 
-// Tanh 分段线性计算（类似实现，接受 LUT 参数）
-__device__ __forceinline__ uint16_t tanh_piecewise_linear_int16(
+// Tanh 分段线性计算（INT16 版本）
+// 输入：int16（有符号），输出：int16（有符号）
+__device__ __forceinline__ int16_t tanh_piecewise_linear_int16(
     uint16_t q_x,
-    const SigmoidLUT_INT16& lut
+    const TanhLUT_INT16& lut
 ) {
-
     // 与 sigmoid 相同的计算流程
     int seg_id = find_segment_int16(q_x, lut.segments);
     const SegmentParams_INT16& seg = lut.segments[seg_id];
 
-    // 🔥 修正：使用 int32_t 避免溢出（q_x 是 uint16_t [0, 65535]，zp_x 可能是正数如 24576）
+    // 使用 int32_t 避免溢出
     int32_t x_offset = static_cast<int32_t>(q_x) - static_cast<int32_t>(lut.zp_x);
     int32_t bx_32 = static_cast<int32_t>(seg.q_b) * x_offset;
 
@@ -284,9 +310,10 @@ __device__ __forceinline__ uint16_t tanh_piecewise_linear_int16(
     }
 
     int32_t y_32 = term_bx + seg.term_c_precomputed;
-    int32_t q_y = max(0, min(65535, y_32));
+    // Tanh 输出是有符号的 [-32768, 32767]
+    int32_t q_y = max(-32768, min(32767, y_32));
 
-    return static_cast<uint16_t>(q_y);
+    return static_cast<int16_t>(q_y);
 }
 
 // Sigmoid 分段线性计算（UINT8 版本，接受 LUT 参数）
@@ -325,23 +352,20 @@ __device__ __forceinline__ uint8_t sigmoid_piecewise_linear_int8(
     return static_cast<uint8_t>(q_y);
 }
 
-// Tanh 分段线性计算（UINT8 版本，接受 LUT 参数）
-__device__ __forceinline__ uint8_t tanh_piecewise_linear_int8(
+// Tanh 分段线性计算（INT8 版本）
+// 输入：int8（有符号），输出：int8（有符号）
+__device__ __forceinline__ int8_t tanh_piecewise_linear_int8(
     uint8_t q_x,
-    const SigmoidLUT_INT8& lut
+    const TanhLUT_INT8& lut
 ) {
-
-    // 与 sigmoid 相同的计算流程
-    // [1] 段查找（输入已经是 uint8_t [0, 255]）
+    // [1] 段查找（输入是 uint8_t [0, 255]）
     int seg_id = find_segment_int8(q_x, lut.segments);
     const SegmentParams_INT8& seg = lut.segments[seg_id];
 
     // [2] 去零点
-    // 🔥 修正：使用 int32_t 避免溢出（q_x 是 uint8_t [0, 255]，zp_x 可能是正数）
     int32_t x_offset = static_cast<int32_t>(q_x) - static_cast<int32_t>(lut.zp_x);
 
     // [3] 乘法 + 移位融合
-    // 公式: term_bx = (q_b * x_offset) >> n_BX_total
     int32_t bx_32 = static_cast<int32_t>(seg.q_b) * x_offset;
 
     int32_t term_bx;
@@ -354,10 +378,10 @@ __device__ __forceinline__ uint8_t tanh_piecewise_linear_int8(
     // [4] 相加（term_c 已预计算）
     int32_t y_32 = term_bx + static_cast<int32_t>(seg.term_c_precomputed);
 
-    // [5] 饱和到 UINT8 范围 [0, 255]（根据 Python 参考，非对称量化使用无符号整数）
-    int32_t q_y = max(0, min(255, y_32));
+    // [5] Tanh 输出是有符号的 [-128, 127]
+    int32_t q_y = max(-128, min(127, y_32));
 
-    return static_cast<uint8_t>(q_y);
+    return static_cast<int8_t>(q_y);
 }
 
 }// namespace dev

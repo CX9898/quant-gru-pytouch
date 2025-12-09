@@ -627,12 +627,12 @@ haste_gru_backward_wrapper(
 
 // 初始化量化 LUT 表的包装函数
 // 将 Python 绑定层的参数转换为 C++ 接口层的参数
+// 根据 OperatorQuantConfig 自动选择 LUT 类型
 void initialize_quantization_lut_wrapper(
-    const GRUQuantitativeParametersPy &quant_params,
-    bool use_int16) {
+    const GRUQuantitativeParametersPy &quant_params) {
     // 转换为 C++ 结构体并调用 gru_interface 中的函数
     GRUQuantitativeParameters cpp_params = quant_params.to_cpp();
-    initialize_quantization_lut(cpp_params, use_int16);
+    initialize_quantization_lut(cpp_params);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -754,9 +754,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           py::arg("x"), py::arg("dh_new"), py::arg("h"), py::arg("v"));// 中间值v，必需；返回 (dx, dW, dR, dbx, dbr, dh) 元组
 
     // 初始化量化 LUT 表（仅在初始化时调用一次）
-    // 接收量化参数对象和量化类型，内部根据类型自动选择相应的 LUT 初始化方法
-    // 支持 int8 和 int16，未来可扩展支持其他类型
+    // 根据 OperatorQuantConfig 自动选择相应的 LUT 初始化方法
+    // 支持 uint8 和 uint16，根据配置中的位宽自动选择
     m.def("initialize_quantization_lut", &initialize_quantization_lut_wrapper,
           "Initialize quantization LUT tables from quantization parameters (should be called only once during initialization)",
-          py::arg("quant_params"), py::arg("use_int16"));
+          py::arg("quant_params"));
 }
