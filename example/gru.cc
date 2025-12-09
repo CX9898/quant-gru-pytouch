@@ -406,6 +406,7 @@ GRUTrainGradients GruTrain(const int time_steps,
     const int h_output_size = time_steps * batch_size * hidden_size;
     gradients.h.resize(h_output_size);
     d2h(gradients.h.data(), h_dev.data() + batch_size * hidden_size, h_output_size);
+    d2h(gradients.v,v_dev);
 
     return gradients;
 }
