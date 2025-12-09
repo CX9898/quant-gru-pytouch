@@ -830,10 +830,8 @@ void ForwardPassQuant<T>::setRescaleParam(const GRUQuantitativeParameters &parms
     rescale_param_.n_new_contrib_div_h_ = parms.exp2_inv_new_contrib_ - parms.exp2_inv_h_;
     rescale_param_.n_old_contrib_div_h_ = parms.exp2_inv_old_contrib_ - parms.exp2_inv_h_;
 
-    // TODO delete test
-    rescale_param_.test = parms;
-    h2d(rescale_param_.test.exp2_inv_bx_dev_, parms.exp2_inv_bx_);
-    h2d(rescale_param_.test.exp2_inv_br_dev_, parms.exp2_inv_br_);
+    // 保存完整的量化参数（用于调试）
+//    rescale_param_.test = parms;
 
     // 保存位宽配置
     bitwidth_config_ = parms.bitwidth_config_;
@@ -899,7 +897,8 @@ void ForwardPassQuant<QuantT>::Run(
     const int NH = batch_size * hidden_size;
 
     for (int i = 0; i < steps; ++i) {
-        IterateInternal(R, bx, br, h + i * NH, h + (i + 1) * NH, v + i * NH * 4,
+        const int v_offset = data_->training ? i * NH * 4 : 0;
+        IterateInternal(R, bx, br, h + i * NH, h + (i + 1) * NH, v + v_offset,
                         tmp_Wx + i * NH * 3, tmp_Rh, W_sum_mul_x_zp.data(), R_sum_mul_h_zp.data(),
                         zoneout_prob, zoneout_mask ? zoneout_mask + i * NH : nullptr);
         //        if (i >= 2) { break; }

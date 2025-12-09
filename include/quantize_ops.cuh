@@ -189,29 +189,6 @@ __device__ __forceinline__ int8_t tanh_int8_lut(int8_t x, const int8_t* lut) {
     return lut[static_cast<uint8_t>(idx)];
 }
 
-__device__ __forceinline__ int8_t sigmoid_int16_lut(int16_t x) {  // (TODO: 二项式拟合查表方式)
-    // 将 int16_t 范围 [-32768, 32767] 映射到 int8_t 范围 [-128, 127]
-    // 公式：idx = round( (x + 32768) * (255.0f / 65535.0f) ) - 128
-    // 整数优化：避免浮点运算，用移位实现近似缩放
-    int32_t tmp = static_cast<int32_t>(x) + 32768;  // 转为 [0, 65535]
-    tmp = (tmp * 255 + 65535 / 2) / 65535;          // 四舍五入缩放到 [0, 255]
-    int8_t idx = static_cast<int8_t>(tmp - 128);    // 转为 [-128, 127]
-    //    return d_sigmoid_lut[static_cast<uint8_t>(idx)];
-
-    // -10到10分成N32段, 每段用二次多项式拟合
-
-    // PDQ
-    // QAT 训练
-}
-
-__device__ __forceinline__ int8_t tanh_int16_lut(int16_t x) {  // (TODO: 二项式拟合查表方式)
-    // 与 sigmoid 完全相同的索引映射逻辑
-    int32_t tmp = static_cast<int32_t>(x) + 32768;  // int16_t [-32768, 32767] → [0, 65535]
-    tmp = (tmp * 255 + 65535 / 2) / 65535;          // 缩放到 [0, 255]（四舍五入）
-    int8_t idx = static_cast<int8_t>(tmp - 128);    // → [-128, 127]
-    //    return d_tanh_lut[static_cast<uint8_t>(idx)]; // 用索引访问 tanh LUT
-}
-
 // ==================== 分段线性量化设备端函数 ====================
 
 // 带符号右移（四舍五入）

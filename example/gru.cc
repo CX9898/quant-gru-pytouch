@@ -71,15 +71,15 @@ void GruInferenceQuant(const int time_steps, const int batch_size, const int inp
     dev::vector<QuantT> R_quant_dev(R.size());
     dev::vector<int32_t> bx_quant_dev(bx.size());
     dev::vector<int32_t> br_quant_dev(br.size());
-    {
-        dev::vector<float> W_dev(W);
-        dev::vector<float> R_dev(R);
-        dev::vector<float> bx_dev(bx);
-        dev::vector<float> br_dev(br);
-        quantitativeWeight<QuantT>(input_size, hidden_size, W_dev.data(), R_dev.data(),
-                                   bx_dev.data(), br_dev.data(), quant_parms, W_quant_dev.data(),
-                                   R_quant_dev.data(), bx_quant_dev.data(), br_quant_dev.data());
-    }
+
+    dev::vector<float> W_dev(W);
+    dev::vector<float> R_dev(R);
+    dev::vector<float> bx_dev(bx);
+    dev::vector<float> br_dev(br);
+    quantitativeWeight<QuantT>(input_size, hidden_size, W_dev.data(), R_dev.data(), bx_dev.data(),
+                               br_dev.data(), quant_parms, W_quant_dev.data(), R_quant_dev.data(),
+                               bx_quant_dev.data(), br_quant_dev.data());
+
     {
         ScopeTimer t("GruInferenceQuant:");
         quantGRUForward<QuantT>(false, time_steps, batch_size, input_size, hidden_size,

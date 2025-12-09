@@ -39,10 +39,6 @@ struct GRUQuantitativeParameters {
     std::vector<int32_t> exp2_inv_bx_;
     std::vector<int32_t> exp2_inv_br_;
 
-    // TODO: delete test
-    dev::vector<int32_t> exp2_inv_bx_dev_;
-    dev::vector<int32_t> exp2_inv_br_dev_;
-
     int32_t exp2_inv_z_pre_;
     int32_t zp_z_pre_;
     int32_t exp2_inv_r_pre_;
@@ -550,7 +546,7 @@ inline void calibrateQuantParams(const T orig_min, const T orig_max, const bool 
         T range = orig_max - orig_min;
         range = std::max(range, static_cast<T>(1e-9));
 
-        T raw_scale = range / (quant_max - quant_min);
+        T raw_scale = range / (static_cast<T>(quant_max) - static_cast<T>(quant_min));
 
         // scale >= raw_scale 对齐到 2^-n
         exp2_inv = static_cast<int32_t>(std::floor(std::log2(1.0 / raw_scale)));

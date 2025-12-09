@@ -724,7 +724,8 @@ void ForwardPass<T>::Run(const int steps,
     const int NH = batch_size * hidden_size;
     for (int i = 0; i < steps; ++i) {
         const int Rh_offset = calibration_mode_ ? i * NH * 3 : 0;
-        IterateInternal(i, R, bx, br, h + i * NH, h + (i + 1) * NH, v + i * NH * 4,
+        const int v_offset = data_->training ? i * NH * 4 : 0;
+        IterateInternal(i, R, bx, br, h + i * NH, h + (i + 1) * NH, v + v_offset,
                         tmp_Wx + i * NH * 3, tmp_Rh + Rh_offset, zoneout_prob,
                         zoneout_mask ? zoneout_mask + i * NH : nullptr);
         //        break;
