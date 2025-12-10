@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "quantize_ops_helper.hpp"
+#include "parallelAlgorithm.h"
 
 void calibrateGruScales(bool use_int16, int time_steps, int batch_size, int input_size,
                         int hidden_size, const std::vector<float> &W, const std::vector<float> &R,
@@ -182,8 +183,9 @@ void quantGRUForward(bool is_training,  // 是否开启训练模式，true为训
     dev::vector<QuantT> x_quant(x_size);
     dev::quantification(x, x_quant.data(), x_size, quant_parms.exp2_inv_x_, quant_parms.zp_x_);
 
-    const size_t h_size = (time_steps + 1) * batch_size * hidden_size;
-    dev::vector<QuantT> h_quant(h_size, static_cast<QuantT>(quant_parms.zp_h_));
+    dev::vector<QuantT> h_quant((time_steps + 1) * batch_size * hidden_size);
+    // 初始化 h0 区域（第一个时间步的隐藏状态）为零点值
+    dev::fill_n(h_quant.data(), batch_size * hidden_size, quant_parms.zp_h_);
 
     // 处理初始隐藏状态
     if (h0 != nullptr) {
@@ -217,7 +219,7 @@ void quantGRUForward(bool is_training,  // 是否开启训练模式，true为训
                     tmp_Wx_dev.data(), tmp_Rh_dev.data(), 0.0f, nullptr);
     }
 
-    dev::dequantification(h_quant.data(), h, h_size, quant_parms.exp2_inv_h_, quant_parms.zp_h_);
+    dev::dequantification(h_quant.data(), h, h_quant.size(), quant_parms.exp2_inv_h_, quant_parms.zp_h_);
 }
 
 void forwardInterface(bool is_training,  // 是否开启训练模式，true为训练，false为推理
