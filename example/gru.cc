@@ -15,6 +15,7 @@
 #include "gru_interface.hpp"
 #include "gru_quant.h"
 #include "quantized_unit_testing.cuh"
+#include "parallelAlgorithm.h"
 
 constexpr int BATCH_SIZE = 64;    // 批大小
 constexpr int SEQUENCE_LEN = 50;  // 序列长度(T), 每个样本有T个时间步
@@ -162,7 +163,8 @@ GRUTrainGradients GruTrainQuant(
     }
 
     const std::size_t h_size = (time_steps + 1) * batch_size * hidden_size;
-    dev::vector<QuantT> h_quant_dev(h_size, static_cast<QuantT>(quant_parms.zp_h_));
+    dev::vector<QuantT> h_quant_dev(h_size);
+    dev::fill_n(h_quant_dev.data(), h_size, quant_parms.zp_h_);
     dev::vector<QuantT> v_quant_dev(time_steps * batch_size * hidden_size * 4);
 
     dev::vector<int32_t> tmp_Wx_dev(time_steps * batch_size * hidden_size * 3);
