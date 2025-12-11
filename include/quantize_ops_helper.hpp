@@ -160,7 +160,7 @@ template <typename T>
 void computeWeightSumMulzp(
     const T *W_q,         // [out_dim, in_dim] 权重量化矩阵
     int32_t *weight_sum,  // [out_dim] 输出数组
-    int zp,
+    int32_t zp,
     const int32_t *__restrict__ n,  // n为: scale_W * scale_x / scale_Wx ≈ 2^-n. per-channel
     int out_dim,                    // 输出通道数 (M)
     int in_dim,                     // 输入通道数 (K)
@@ -703,7 +703,7 @@ inline int16_t quantize_coefficient_int16(float val_fp, int8_t shift_bits) {
 }
 
 // 辅助函数：量化输入为 UINT16（非对称量化）
-inline uint16_t quantize_input_uint16(float val_fp, int8_t shift_bits, int16_t zp) {
+inline uint16_t quantize_input_uint16(float val_fp, int8_t shift_bits, int32_t zp) {
     float scale = std::pow(2.0f, -static_cast<float>(shift_bits));
     int32_t q = static_cast<int32_t>(std::round(val_fp / scale + static_cast<float>(zp)));
     q = std::max(0, std::min(65535, q));
@@ -728,7 +728,7 @@ inline int8_t quantize_coefficient_int8(float val_fp, int8_t shift_bits) {
 }
 
 // 辅助函数：量化输入为 UINT8（非对称量化）
-inline uint8_t quantize_input_uint8(float val_fp, int8_t shift_bits, int8_t zp) {
+inline uint8_t quantize_input_uint8(float val_fp, int8_t shift_bits, int32_t zp) {
     float scale = std::pow(2.0f, -static_cast<float>(shift_bits));
     int32_t q = static_cast<int32_t>(std::round(val_fp / scale + static_cast<float>(zp)));
     q = std::max(0, std::min(255, q));
@@ -744,24 +744,24 @@ inline int8_t determine_shift_bits_int8(float max_val) {
     return std::max(static_cast<int8_t>(0), shift_bits);
 }
 
-void init_sigmoid_z_lut_int8(int8_t shift_bits_x, int8_t zp_x, int8_t shift_bits_y, int8_t zp_y,
+void init_sigmoid_z_lut_int8(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
                              float x_min = -6.0f, float x_max = 6.0f);
 
-void init_sigmoid_r_lut_int8(int8_t shift_bits_x, int8_t zp_x, int8_t shift_bits_y, int8_t zp_y,
+void init_sigmoid_r_lut_int8(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
                              float x_min = -6.0f, float x_max = 6.0f);
 
-void init_tanh_lut_int8(int8_t shift_bits_x, int8_t zp_x, int8_t shift_bits_y, int8_t zp_y,
+void init_tanh_lut_int8(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
                         float x_min = -6.0f, float x_max = 6.0f);
 
-void init_tanh_lut_int16(int8_t shift_bits_x, int16_t zp_x, int8_t shift_bits_y, int16_t zp_y,
+void init_tanh_lut_int16(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
                          float x_min = -6.0f, float x_max = 6.0f);
 
 // 初始化 LUT（将数据复制到 CUDA 常量内存，INT16 版本 - r 门）
-void init_sigmoid_r_lut_int16(int8_t shift_bits_x, int16_t zp_x, int8_t shift_bits_y, int16_t zp_y,
+void init_sigmoid_r_lut_int16(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
                               float x_min = -6.0f, float x_max = 6.0f);
 
 // 初始化 LUT（将数据复制到 CUDA 常量内存，INT16 版本 - z 门）
-void init_sigmoid_z_lut_int16(int8_t shift_bits_x, int16_t zp_x, int8_t shift_bits_y, int16_t zp_y,
+void init_sigmoid_z_lut_int16(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
                               float x_min = -6.0f, float x_max = 6.0f);
 
 template <typename T, typename QuantT>

@@ -39,8 +39,8 @@ __constant__ SigmoidLUT_INT8 d_sigmoid_r_lut_int8;
 __constant__ TanhLUT_INT16 d_tanh_lut_int16;
 __constant__ TanhLUT_INT8 d_tanh_lut_int8;
 
-std::vector<int8_t> generate_sigmoid_int8_lut(float scale_z_pre, int zp_z_pre, float scale_z,
-                                              int zp_z) {
+std::vector<int8_t> generate_sigmoid_int8_lut(float scale_z_pre, int32_t zp_z_pre, float scale_z,
+                                              int32_t zp_z) {
     std::vector<int8_t> lut(256);
 
     for (int i = 0; i < 256; i++) {
@@ -59,8 +59,8 @@ std::vector<int8_t> generate_sigmoid_int8_lut(float scale_z_pre, int zp_z_pre, f
 }
 
 // uint8 版本：sigmoid 输出范围 [0, 1] 映射到 [0, 255]
-std::vector<uint8_t> generate_sigmoid_uint8_lut(float scale_z_pre, int zp_z_pre, float scale_z,
-                                                int zp_z) {
+std::vector<uint8_t> generate_sigmoid_uint8_lut(float scale_z_pre, int32_t zp_z_pre, float scale_z,
+                                                int32_t zp_z) {
     std::vector<uint8_t> lut(256);
 
     for (int i = 0; i < 256; i++) {
@@ -79,8 +79,8 @@ std::vector<uint8_t> generate_sigmoid_uint8_lut(float scale_z_pre, int zp_z_pre,
     return lut;
 }
 
-std::vector<int8_t> generate_tanh_int8_lut(float scale_pre, int zp_pre, float scale_out,
-                                           int zp_out) {
+std::vector<int8_t> generate_tanh_int8_lut(float scale_pre, int32_t zp_pre, float scale_out,
+                                           int32_t zp_out) {
     std::vector<int8_t> lut(256);
 
     for (int i = 0; i < 256; i++) {
@@ -134,8 +134,8 @@ void generate_int8_lut(float scale_z_pre, int32_t zp_z_pre, float scale_z_out, i
                        sizeof(int8_t) * 256);  // 从host端拷贝到device端中编译期固定的地址
 }
 
-std::vector<int8_t> generate_sigmoid_int8_lut_exp2(int32_t exp2_inv_z_pre, int zp_z_pre,
-                                                   int32_t exp2_inv_z, int zp_z) {
+std::vector<int8_t> generate_sigmoid_int8_lut_exp2(int32_t exp2_inv_z_pre, int32_t zp_z_pre,
+                                                   int32_t exp2_inv_z, int32_t zp_z) {
     std::vector<int8_t> lut(256);
 
     for (int i = 0; i < 256; i++) {
@@ -156,8 +156,8 @@ std::vector<int8_t> generate_sigmoid_int8_lut_exp2(int32_t exp2_inv_z_pre, int z
     return lut;
 }
 
-std::vector<int8_t> generate_tanh_int8_lut_exp2(int32_t exp2_inv_pre, int zp_pre,
-                                                int32_t exp2_inv_out, int zp_out) {
+std::vector<int8_t> generate_tanh_int8_lut_exp2(int32_t exp2_inv_pre, int32_t zp_pre,
+                                                int32_t exp2_inv_out, int32_t zp_out) {
     std::vector<int8_t> lut(256);
 
     for (int i = 0; i < 256; i++) {
@@ -179,8 +179,8 @@ std::vector<int8_t> generate_tanh_int8_lut_exp2(int32_t exp2_inv_pre, int zp_pre
 }
 
 // uint8 版本：sigmoid 输出量化到 [0, 255]
-std::vector<uint8_t> generate_sigmoid_uint8_lut_exp2(int32_t exp2_inv_z_pre, int zp_z_pre,
-                                                     int32_t exp2_inv_z, int zp_z) {
+std::vector<uint8_t> generate_sigmoid_uint8_lut_exp2(int32_t exp2_inv_z_pre, int32_t zp_z_pre,
+                                                     int32_t exp2_inv_z, int32_t zp_z) {
     std::vector<uint8_t> lut(256);
 
     for (int i = 0; i < 256; i++) {
@@ -300,52 +300,32 @@ void generate_piecewise_linear_lut_from_exp2_inv(const GRUQuantitativeParameters
 
     // ========== Z 门 LUT 初始化（sigmoid，输出 uint）==========
     if (z_use_16bit) {
-        uint16_t zp_z_pre_quant =
-            static_cast<uint16_t>(std::max(0, std::min(65535, params.zp_z_pre_)));
-        uint16_t zp_z_out_quant =
-            static_cast<uint16_t>(std::max(0, std::min(65535, params.zp_z_out_)));
-        init_sigmoid_z_lut_int16(shift_bits_z_pre, static_cast<int16_t>(zp_z_pre_quant),
-                                 shift_bits_z_out, static_cast<int16_t>(zp_z_out_quant), x_min_z,
+        init_sigmoid_z_lut_int16(shift_bits_z_pre, params.zp_z_pre_,
+                                 shift_bits_z_out, params.zp_z_out_, x_min_z,
                                  x_max_z);
     } else {
-        uint8_t zp_z_pre_quant = static_cast<uint8_t>(std::max(0, std::min(255, params.zp_z_pre_)));
-        uint8_t zp_z_out_quant = static_cast<uint8_t>(std::max(0, std::min(255, params.zp_z_out_)));
-        init_sigmoid_z_lut_int8(shift_bits_z_pre, static_cast<int8_t>(zp_z_pre_quant),
-                                shift_bits_z_out, static_cast<int8_t>(zp_z_out_quant), x_min_z,
+        init_sigmoid_z_lut_int8(shift_bits_z_pre, params.zp_z_pre_,
+                                shift_bits_z_out, params.zp_z_out_, x_min_z,
                                 x_max_z);
     }
 
     // ========== R 门 LUT 初始化（sigmoid，输出 uint）==========
     if (r_use_16bit) {
-        uint16_t zp_r_pre_quant =
-            static_cast<uint16_t>(std::max(0, std::min(65535, params.zp_r_pre_)));
-        uint16_t zp_r_out_quant =
-            static_cast<uint16_t>(std::max(0, std::min(65535, params.zp_r_out_)));
-        init_sigmoid_r_lut_int16(shift_bits_r_pre, static_cast<int16_t>(zp_r_pre_quant),
-                                 shift_bits_r_out, static_cast<int16_t>(zp_r_out_quant), x_min_r,
+        init_sigmoid_r_lut_int16(shift_bits_r_pre, params.zp_r_pre_,
+                                 shift_bits_r_out, params.zp_r_out_, x_min_r,
                                  x_max_r);
     } else {
-        uint8_t zp_r_pre_quant = static_cast<uint8_t>(std::max(0, std::min(255, params.zp_r_pre_)));
-        uint8_t zp_r_out_quant = static_cast<uint8_t>(std::max(0, std::min(255, params.zp_r_out_)));
-        init_sigmoid_r_lut_int8(shift_bits_r_pre, static_cast<int8_t>(zp_r_pre_quant),
-                                shift_bits_r_out, static_cast<int8_t>(zp_r_out_quant), x_min_r,
+        init_sigmoid_r_lut_int8(shift_bits_r_pre, params.zp_r_pre_,
+                                shift_bits_r_out, params.zp_r_out_, x_min_r,
                                 x_max_r);
     }
 
     // ========== G 门 LUT 初始化（tanh，输出 int）==========
     if (g_use_16bit) {
-        int16_t zp_g_pre_quant =
-            static_cast<int16_t>(std::max(-32768, std::min(32767, params.zp_g_pre_)));
-        int16_t zp_g_out_quant =
-            static_cast<int16_t>(std::max(-32768, std::min(32767, params.zp_g_out_)));
-        init_tanh_lut_int16(shift_bits_g_pre, zp_g_pre_quant, shift_bits_g_out, zp_g_out_quant,
+        init_tanh_lut_int16(shift_bits_g_pre, params.zp_g_pre_, shift_bits_g_out, params.zp_g_out_,
                             x_min_g, x_max_g);
     } else {
-        int8_t zp_g_pre_quant =
-            static_cast<int8_t>(std::max(-128, std::min(127, params.zp_g_pre_)));
-        int8_t zp_g_out_quant =
-            static_cast<int8_t>(std::max(-128, std::min(127, params.zp_g_out_)));
-        init_tanh_lut_int8(shift_bits_g_pre, zp_g_pre_quant, shift_bits_g_out, zp_g_out_quant,
+        init_tanh_lut_int8(shift_bits_g_pre, params.zp_g_pre_, shift_bits_g_out, params.zp_g_out_,
                            x_min_g, x_max_g);
     }
 }
@@ -356,7 +336,7 @@ template <typename T>
 __global__ void computeWeightSumMulZP(
     const T *__restrict__ W_q,         // [out_dim, in_dim] 权重量化矩阵, 列主序储存
     int32_t *__restrict__ weight_sum,  // [out_dim] 输出数组
-    int x_zp,
+    int32_t x_zp,
     const int32_t *__restrict__ n,  // n为: scale_W * scale_x / scale_Wx ≈ 2^-n.
     // per-channel
     int out_dim,  // 输出通道数 (M)
@@ -810,9 +790,9 @@ std::vector<float> adaptive_segmentation_sigmoid(float x_min, float x_max, int n
 
 // 生成 Sigmoid 分段线性拟合 LUT（主机端）
 SigmoidLUT_INT16 generate_sigmoid_lut_int16(int8_t shift_bits_x,  // 输入 shift_bits
-                                            int16_t zp_x,         // 输入 zero-point
+                                            int32_t zp_x,         // 输入 zero-point
                                             int8_t shift_bits_y,  // 输出 shift_bits
-                                            int16_t zp_y,         // 输出 zero-point
+                                            int32_t zp_y,         // 输出 zero-point
                                             float x_min,          // 输入范围最小值
                                             float x_max           // 输入范围最大值
 ) {
@@ -919,8 +899,8 @@ SigmoidLUT_INT16 generate_sigmoid_lut_int16(int8_t shift_bits_x,  // 输入 shif
 
 // 生成 Tanh 分段线性拟合 LUT（主机端）
 // Tanh 输入 int16，输出 int16（有符号）
-TanhLUT_INT16 generate_tanh_lut_int16(int8_t shift_bits_x, int16_t zp_x, int8_t shift_bits_y,
-                                      int16_t zp_y, float x_min, float x_max) {
+TanhLUT_INT16 generate_tanh_lut_int16(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y,
+                                      int32_t zp_y, float x_min, float x_max) {
     TanhLUT_INT16 lut;
     lut.shift_bits_x = shift_bits_x;
     lut.zp_x = zp_x;
@@ -997,7 +977,7 @@ TanhLUT_INT16 generate_tanh_lut_int16(int8_t shift_bits_x, int16_t zp_x, int8_t 
 }
 
 // 初始化 LUT（将数据复制到 CUDA 常量内存，INT16 版本 - z 门）
-void init_sigmoid_z_lut_int16(int8_t shift_bits_x, int16_t zp_x, int8_t shift_bits_y, int16_t zp_y,
+void init_sigmoid_z_lut_int16(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
                               float x_min, float x_max) {
     SigmoidLUT_INT16 lut =
         generate_sigmoid_lut_int16(shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
@@ -1010,7 +990,7 @@ void init_sigmoid_z_lut_int16(int8_t shift_bits_x, int16_t zp_x, int8_t shift_bi
 }
 
 // 初始化 LUT（将数据复制到 CUDA 常量内存，INT16 版本 - r 门）
-void init_sigmoid_r_lut_int16(int8_t shift_bits_x, int16_t zp_x, int8_t shift_bits_y, int16_t zp_y,
+void init_sigmoid_r_lut_int16(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
                               float x_min, float x_max) {
     SigmoidLUT_INT16 lut =
         generate_sigmoid_lut_int16(shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
@@ -1022,7 +1002,7 @@ void init_sigmoid_r_lut_int16(int8_t shift_bits_x, int16_t zp_x, int8_t shift_bi
     }
 }
 
-void init_tanh_lut_int16(int8_t shift_bits_x, int16_t zp_x, int8_t shift_bits_y, int16_t zp_y,
+void init_tanh_lut_int16(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
                          float x_min, float x_max) {
     TanhLUT_INT16 lut =
         generate_tanh_lut_int16(shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
@@ -1038,9 +1018,9 @@ void init_tanh_lut_int16(int8_t shift_bits_x, int16_t zp_x, int8_t shift_bits_y,
 
 // 生成 Sigmoid 分段线性拟合 LUT（INT8 版本）
 SigmoidLUT_INT8 generate_sigmoid_lut_int8(int8_t shift_bits_x,  // 输入 shift_bits
-                                          int8_t zp_x,          // 输入 zero-point
+                                          int32_t zp_x,         // 输入 zero-point
                                           int8_t shift_bits_y,  // 输出 shift_bits
-                                          int8_t zp_y,          // 输出 zero-point
+                                          int32_t zp_y,         // 输出 zero-point
                                           float x_min,          // 输入范围最小值
                                           float x_max           // 输入范围最大值
 ) {
@@ -1143,8 +1123,8 @@ SigmoidLUT_INT8 generate_sigmoid_lut_int8(int8_t shift_bits_x,  // 输入 shift_
 
 // 生成 Tanh 分段线性拟合 LUT（INT8 版本）
 // Tanh 输入 int8，输出 int8（有符号）
-TanhLUT_INT8 generate_tanh_lut_int8(int8_t shift_bits_x, int8_t zp_x, int8_t shift_bits_y,
-                                    int8_t zp_y, float x_min, float x_max) {
+TanhLUT_INT8 generate_tanh_lut_int8(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y,
+                                    int32_t zp_y, float x_min, float x_max) {
     TanhLUT_INT8 lut;
     lut.shift_bits_x = shift_bits_x;
     lut.zp_x = zp_x;
@@ -1224,7 +1204,7 @@ TanhLUT_INT8 generate_tanh_lut_int8(int8_t shift_bits_x, int8_t zp_x, int8_t shi
 }
 
 // 初始化 LUT（将数据复制到 CUDA 常量内存，INT8 版本 - z 门）
-void init_sigmoid_z_lut_int8(int8_t shift_bits_x, int8_t zp_x, int8_t shift_bits_y, int8_t zp_y,
+void init_sigmoid_z_lut_int8(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
                              float x_min, float x_max) {
     SigmoidLUT_INT8 lut =
         generate_sigmoid_lut_int8(shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
@@ -1238,7 +1218,7 @@ void init_sigmoid_z_lut_int8(int8_t shift_bits_x, int8_t zp_x, int8_t shift_bits
 }
 
 // 初始化 LUT（将数据复制到 CUDA 常量内存，INT8 版本 - r 门）
-void init_sigmoid_r_lut_int8(int8_t shift_bits_x, int8_t zp_x, int8_t shift_bits_y, int8_t zp_y,
+void init_sigmoid_r_lut_int8(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
                              float x_min, float x_max) {
     SigmoidLUT_INT8 lut =
         generate_sigmoid_lut_int8(shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
@@ -1251,7 +1231,7 @@ void init_sigmoid_r_lut_int8(int8_t shift_bits_x, int8_t zp_x, int8_t shift_bits
     }
 }
 
-void init_tanh_lut_int8(int8_t shift_bits_x, int8_t zp_x, int8_t shift_bits_y, int8_t zp_y,
+void init_tanh_lut_int8(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
                         float x_min, float x_max) {
     TanhLUT_INT8 lut = generate_tanh_lut_int8(shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
 

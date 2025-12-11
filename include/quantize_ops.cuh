@@ -28,19 +28,19 @@ struct SegmentParams_INT16 {
 // Sigmoid 查找表结构（INT16）- 输入 int16，输出 uint16
 struct SigmoidLUT_INT16 {
     SegmentParams_INT16 segments[NUM_SEGMENTS];
-    int16_t zp_x;         // 输入 zero-point (INT16，有符号)
+    int32_t zp_x;         // 输入 zero-point (INT32)
     int8_t shift_bits_x;  // 输入 shift_bits (INT8)
     int8_t shift_bits_y;  // 输出 shift_bits (INT8)
-    uint16_t zp_y;        // 输出 zero-point (UINT16，无符号)
+    int32_t zp_y;         // 输出 zero-point (INT32)
 };
 
 // Tanh 查找表结构（INT16）- 输入 int16，输出 int16
 struct TanhLUT_INT16 {
     SegmentParams_INT16 segments[NUM_SEGMENTS];
-    int16_t zp_x;         // 输入 zero-point (INT16，有符号)
+    int32_t zp_x;         // 输入 zero-point (INT32)
     int8_t shift_bits_x;  // 输入 shift_bits (INT8)
     int8_t shift_bits_y;  // 输出 shift_bits (INT8)
-    int16_t zp_y;         // 输出 zero-point (INT16，有符号)
+    int32_t zp_y;         // 输出 zero-point (INT32)
 };
 
 // ==================== INT8 版本 ====================
@@ -56,19 +56,19 @@ struct SegmentParams_INT8 {
 // Sigmoid 查找表结构（INT8）- 输入 int8，输出 uint8
 struct SigmoidLUT_INT8 {
     SegmentParams_INT8 segments[NUM_SEGMENTS];
-    int8_t zp_x;          // 输入 zero-point (INT8，有符号)
+    int32_t zp_x;         // 输入 zero-point (INT32)
     int8_t shift_bits_x;  // 输入 shift_bits (INT8)
     int8_t shift_bits_y;  // 输出 shift_bits (INT8)
-    uint8_t zp_y;         // 输出 zero-point (UINT8，无符号)
+    int32_t zp_y;         // 输出 zero-point (INT32)
 };
 
 // Tanh 查找表结构（INT8）- 输入 int8，输出 int8
 struct TanhLUT_INT8 {
     SegmentParams_INT8 segments[NUM_SEGMENTS];
-    int8_t zp_x;          // 输入 zero-point (INT8，有符号)
+    int32_t zp_x;         // 输入 zero-point (INT32)
     int8_t shift_bits_x;  // 输入 shift_bits (INT8)
     int8_t shift_bits_y;  // 输出 shift_bits (INT8)
-    int8_t zp_y;          // 输出 zero-point (INT8，有符号)
+    int32_t zp_y;         // 输出 zero-point (INT32)
 };
 
 // ==================== 常量内存声明（CUDA设备端）====================
