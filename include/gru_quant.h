@@ -7,7 +7,12 @@
 
 namespace gru {
 
-template <typename QuantT>
+// 模板参数说明:
+// - XT: 输入 x 的量化类型
+// - HT: 隐藏状态 h 的量化类型
+// - WT: 权重矩阵 W 的量化类型
+// - RT: 递归权重矩阵 R 的量化类型
+template <typename XT, typename HT, typename WT, typename RT>
 class ForwardPassQuant {
    public:
     // training: `true` if the caller intends to perform a backward pass to compute gradients.
@@ -40,6 +45,12 @@ class ForwardPassQuant {
     //     `true`, this vector will contain intermediate activations for this iteration which
     //     must be provided as-is to the corresponding backward iteration. The caller must
     //     provide a new memory region for each iteration.
+    //     注意: v 使用 int32_t 统一存储，但内部各部分原始类型不同：
+    //       - v[0*H : 1*H]: z (QuantZ 类型，存为 int32_t)
+    //       - v[1*H : 2*H]: r (QuantR 类型，存为 int32_t)
+    //       - v[2*H : 3*H]: g (QuantG 类型，存为 int32_t)
+    //       - v[3*H : 4*H]: Rh_add_br_g (int32_t 类型)
+    //     反量化时需使用对应的量化参数 (exp2_inv_z/r/g/Rh_add_br, zp_z/r/g/Rh_add_br)。
     // tmp_Wx: [N,H*3] additional temporary work space required for this iteration. The caller
     //     should not use the contents of this vector, and must provide a new memory region for
     //     each iteration.
@@ -52,20 +63,20 @@ class ForwardPassQuant {
     // zoneout_mask: [N,H] may be null to disable zoneout. This is a random binary mask
     //     following a Bernoulli(1-zoneout_prob) distribution. A different mask is typically
     //     used for each iteration.
-    void Iterate(const QuantT *W, const QuantT *R, const int32_t *bx, const int32_t *br,
-                 const QuantT *x, const QuantT *h, QuantT *h_out, QuantT *v, int32_t *tmp_Wx,
-                 int32_t *tmp_Rh, const float zoneout_prob, const QuantT *zoneout_mask);
+    void Iterate(const WT *W, const RT *R, const int32_t *bx, const int32_t *br,
+                 const XT *x, const HT *h, HT *h_out, int32_t *v, int32_t *tmp_Wx,
+                 int32_t *tmp_Rh, const float zoneout_prob, const HT *zoneout_mask);
 
-    void Run(const int steps, const QuantT *W, const QuantT *R, const int32_t *bx,
-             const int32_t *br, const QuantT *x, QuantT *h, QuantT *v, int32_t *tmp_Wx,
-             int32_t *tmp_Rh, const float zoneout_prob, const QuantT *zoneout_mask);
+    void Run(const int steps, const WT *W, const RT *R, const int32_t *bx,
+             const int32_t *br, const XT *x, HT *h, int32_t *v, int32_t *tmp_Wx,
+             int32_t *tmp_Rh, const float zoneout_prob, const HT *zoneout_mask);
 
    private:
-    void IterateInternal(const QuantT *R, const int32_t *bx, const int32_t *br, const QuantT *h,
-                         QuantT *h_out, QuantT *v, const int32_t *tmp_Wx, int32_t *tmp_Rh,
+    void IterateInternal(const RT *R, const int32_t *bx, const int32_t *br, const HT *h,
+                         HT *h_out, int32_t *v, const int32_t *tmp_Wx, int32_t *tmp_Rh,
                          const int *W_sum_mul_x_zp,  // hidden_size * 3
                          const int *R_sum_mul_h_zp,  // hidden_size * 3
-                         const float zoneout_prob, const QuantT *zoneout_mask);
+                         const float zoneout_prob, const HT *zoneout_mask);
 
     struct private_data;
     private_data *data_;

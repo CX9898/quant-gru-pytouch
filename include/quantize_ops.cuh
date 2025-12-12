@@ -4,9 +4,11 @@
 
 #include <cstdint>
 
-extern __constant__ int8_t d_sigmoid_int8_z_lut[256];
-extern __constant__ int8_t d_sigmoid_int8_r_lut[256];
-extern __constant__ int8_t d_tanh_int8_g_lut[256];
+#include "quantize_ops_helper.hpp"
+
+extern __constant__ uint8_t d_sigmoid_int8_z_lut[256];  // sigmoid 输出 [0,1] 使用无符号
+extern __constant__ uint8_t d_sigmoid_int8_r_lut[256];  // sigmoid 输出 [0,1] 使用无符号
+extern __constant__ int8_t d_tanh_int8_g_lut[256];      // tanh 输出 [-1,1] 仍使用有符号
 
 // uint8 版本的 sigmoid LUT（输出范围 [0, 255]，适用于 sigmoid 输出）
 extern __constant__ uint8_t d_sigmoid_uint8_z_lut[256];
@@ -22,7 +24,7 @@ struct SegmentParams_INT16 {
     int16_t q_b;                 // 量化后的系数 b (INT16)
     int8_t n_BX_total;           // 融合后的移位位数 (INT8，可能为负)
     int32_t term_c_precomputed;  // 预计算的 term_c (INT32)
-    uint16_t threshold;          // 段阈值 (UINT16，量化后的输入值)
+    int16_t threshold;           // 段阈值 (INT16，量化后的输入值)
 };
 
 // Sigmoid 查找表结构（INT16）- 输入 int16，输出 uint16
@@ -50,16 +52,16 @@ struct SegmentParams_INT8 {
     int8_t q_b;                  // 量化后的系数 b (INT8)
     int8_t n_BX_total;           // 融合后的移位位数 (INT8，可能为负)
     int16_t term_c_precomputed;  // 预计算的 term_c (INT16)
-    uint8_t threshold;           // 段阈值 (UINT8，量化后的输入值)
+    int8_t threshold;            // 段阈值 (INT8，量化后的输入值)
 };
 
 // Sigmoid 查找表结构（INT8）- 输入 int8，输出 uint8
 struct SigmoidLUT_INT8 {
     SegmentParams_INT8 segments[NUM_SEGMENTS];
-    int32_t zp_x;         // 输入 zero-point (INT32)
+    int32_t zp_x;          // 输入 zero-point (INT32)
     int8_t shift_bits_x;  // 输入 shift_bits (INT8)
     int8_t shift_bits_y;  // 输出 shift_bits (INT8)
-    int32_t zp_y;         // 输出 zero-point (INT32)
+    int32_t zp_y;          // 输出 zero-point (INT32)
 };
 
 // Tanh 查找表结构（INT8）- 输入 int8，输出 int8
@@ -111,12 +113,13 @@ __device__ __forceinline__ uint8_t clamp(int x) {
     return static_cast<uint8_t>(max(0, min(255, x)));
 }
 
+// uint16_t 特化（用于 sigmoid 输出 [0, 65535]）
 template <>
 __device__ __forceinline__ uint16_t clamp(int x) {
     return static_cast<uint16_t>(max(0, min(65535, x)));
 }
 
-// Round 函数：只负责四舍五入，不限制范围
+// Round 函数
 __device__ __forceinline__ int32_t round(float val) {
     // 使用 CUDA 内置函数 __float2int_rn 进行四舍五入（round to nearest）
     // 这比 roundf 更高效，因为它直接返回整数
@@ -151,8 +154,24 @@ struct QuantLimits<int32_t> {
     static __host__ __device__ constexpr int max() { return 2147483647; }
 };
 
+// uint8_t 特化（用于 sigmoid 输出）
+template <>
+struct QuantLimits<uint8_t> {
+    static __device__ __forceinline__ constexpr int32_t min() { return 0; }
+
+    static __device__ __forceinline__ constexpr int32_t max() { return 255; }
+};
+
+// uint16_t 特化（用于 sigmoid 输出）
+template <>
+struct QuantLimits<uint16_t> {
+    static __device__ __forceinline__ constexpr int32_t min() { return 0; }
+
+    static __device__ __forceinline__ constexpr int32_t max() { return 65535; }
+};
+
 template <typename QuantT>
-inline __device__ QuantT quantize(float src, int32_t exp2_inv, int32_t zp) {
+inline __device__ QuantT quantize(float src, int8_t exp2_inv, int32_t zp) {
     // CUDA device code: 与CPU版本保持一致，使用位运算
     // 量化公式：q = round(src / scale + zp)
     float scale;
@@ -171,14 +190,8 @@ inline __device__ QuantT quantize(float src, int32_t exp2_inv, int32_t zp) {
     return static_cast<QuantT>(q);
 }
 
-__device__ __forceinline__ int8_t sigmoid_int8_lut(int8_t x, const int8_t* lut) {
-    // x in [-128,127], lut 长度 = 256
-    const int idx = static_cast<uint8_t>(x + 128);  // 对齐 LUT 初始化
-    return lut[idx];
-}
-
-// uint8 版本的 sigmoid LUT 查找（输出范围 [0, 255]）
-__device__ __forceinline__ uint8_t sigmoid_uint8_lut(int8_t x, const uint8_t* lut) {
+// sigmoid LUT 查找函数：输入为 int8_t（有符号），输出为 uint8_t（无符号，因为 sigmoid ∈ [0,1]）
+__device__ __forceinline__ uint8_t sigmoid_int8_lut(int8_t x, const uint8_t* lut) {
     // x in [-128,127], lut 长度 = 256
     const int idx = static_cast<uint8_t>(x + 128);  // 对齐 LUT 初始化
     return lut[idx];
@@ -190,158 +203,155 @@ __device__ __forceinline__ int8_t tanh_int8_lut(int8_t x, const int8_t* lut) {
 }
 
 // ==================== 分段线性量化设备端函数 ====================
+//
+// 【原理】将非线性函数(Sigmoid/Tanh)在每个分段内用线性函数 y = b*x + c 近似
+//
+// 【浮点公式】 y_fp = b_fp * x_fp + c_fp
+//
+// 【量化公式】 q_y = (q_b * (q_x - zp_x)) >> n_BX_total + term_c_precomputed
+//
+// 【参数说明】
+//   q_x           : 量化输入（有符号整数 INT8/INT16）
+//   zp_x          : 输入零点
+//   q_b           : 量化斜率（有符号，对称量化）
+//   n_BX_total    : 融合移位 = shift_bits_b + shift_bits_x - shift_bits_y
+//   term_c_precomputed : 预计算常数项 = q_c >> (shift_bits_c - shift_bits_y)
+//                        其中 q_c 已包含输出零点烘焙: c_adjusted = c_fp + zp_y * scale_y
+//
+// 【计算步骤】
+//   Step 1: seg_id = find_segment(q_x)           // 段查找
+//   Step 2: x_offset = q_x - zp_x                // 去零点
+//   Step 3: bx = q_b * x_offset                  // 乘法（INT32）
+//   Step 4: term_bx = bx >> n_BX_total           // 移位（右移或左移）
+//   Step 5: q_y = term_bx + term_c_precomputed   // 相加
+//   Step 6: q_y = clamp(q_y, Q_MIN, Q_MAX)       // 饱和
+//
+// =========================================================================
 
-// 带符号右移（四舍五入）
-__device__ __forceinline__ int32_t rshift_round(int32_t val, int8_t shift) {
-    if (shift <= 0) return val;
-    if (shift >= 32) return (val >= 0) ? 0 : -1;
-
-    // 四舍五入：加上 1 << (shift - 1)
-    int32_t round_val =
-        (val >= 0) ? (val + (1 << (shift - 1))) >> shift : (val - (1 << (shift - 1))) >> shift;
-    return round_val;
-}
-
-// 段查找函数（线性查找，32段足够快）
-__device__ __forceinline__ int find_segment_int16(uint16_t q_x,
+/**
+ * @brief 段查找函数（INT16 版本）
+ * @note 线性查找，对于 NUM_SEGMENTS=16 足够快
+ */
+__device__ __forceinline__ int find_segment_int16(int16_t q_x,
                                                   const SegmentParams_INT16* segments) {
     for (int i = 0; i < NUM_SEGMENTS; i++) {
         if (q_x < segments[i].threshold) {
             return i;
         }
     }
-    return NUM_SEGMENTS - 1;  // 返回最后一个段
+    return NUM_SEGMENTS - 1;
 }
 
-// INT8 版本的段查找函数
-__device__ __forceinline__ int find_segment_int8(uint8_t q_x, const SegmentParams_INT8* segments) {
+/**
+ * @brief 段查找函数（INT8 版本）
+ */
+__device__ __forceinline__ int find_segment_int8(int8_t q_x, const SegmentParams_INT8* segments) {
     for (int i = 0; i < NUM_SEGMENTS; i++) {
         if (q_x < segments[i].threshold) {
             return i;
         }
     }
-    return NUM_SEGMENTS - 1;  // 返回最后一个段
+    return NUM_SEGMENTS - 1;
 }
 
-// Sigmoid 分段线性计算（核心函数，接受 LUT 参数）
-__device__ __forceinline__ uint16_t sigmoid_piecewise_linear_int16(uint16_t q_x,
+/**
+ * @brief Sigmoid 分段线性近似（INT16 版本）
+ * @param q_x 量化输入，int16_t [-32768, 32767]
+ * @param lut 分段线性查找表
+ * @return 量化输出，uint16_t [0, 65535]（sigmoid ∈ [0, 1] 为无符号）
+ */
+__device__ __forceinline__ uint16_t sigmoid_piecewise_linear_int16(int16_t q_x,
                                                                    const SigmoidLUT_INT16& lut) {
-    // [1] 段查找
+    // Step 1: seg_id = find_segment(q_x)
     int seg_id = find_segment_int16(q_x, lut.segments);
     const SegmentParams_INT16& seg = lut.segments[seg_id];
 
-    // [2] 去零点
-    // 🔥 修正：使用 int32_t 避免溢出（q_x 是 uint16_t [0, 65535]，zp_x 可能是正数如 24576）
+    // Step 2: x_offset = q_x - zp_x
     int32_t x_offset = static_cast<int32_t>(q_x) - static_cast<int32_t>(lut.zp_x);
 
-    // [3] 乘法 + 移位融合
-    // 公式: term_bx = (q_b * x_offset) >> n_BX_total
-    int32_t bx_32 = static_cast<int32_t>(seg.q_b) * static_cast<int32_t>(x_offset);
-
-    int32_t term_bx;
-    if (seg.n_BX_total >= 0) {
-        // 右移
-        term_bx = rshift_round(bx_32, seg.n_BX_total);
-    } else {
-        // 左移（n_BX_total < 0）
-        term_bx = bx_32 << (-seg.n_BX_total);
-    }
-
-    // [4] 相加（term_c 已预计算）
-    int32_t y_32 = term_bx + seg.term_c_precomputed;
-
-    // [5] 饱和到 UINT16 范围 [0, 65535]
-    int32_t q_y = max(0, min(65535, y_32));
-
-    return static_cast<uint16_t>(q_y);
-}
-
-// Tanh 分段线性计算（INT16 版本）
-// 输入：int16（有符号），输出：int16（有符号）
-__device__ __forceinline__ int16_t tanh_piecewise_linear_int16(uint16_t q_x,
-                                                               const TanhLUT_INT16& lut) {
-    // 与 sigmoid 相同的计算流程
-    int seg_id = find_segment_int16(q_x, lut.segments);
-    const SegmentParams_INT16& seg = lut.segments[seg_id];
-
-    // 使用 int32_t 避免溢出
-    int32_t x_offset = static_cast<int32_t>(q_x) - static_cast<int32_t>(lut.zp_x);
+    // Step 3-4: bx = q_b * x_offset; term_bx = bx >> n_BX_total
     int32_t bx_32 = static_cast<int32_t>(seg.q_b) * x_offset;
+    int32_t term_bx = (seg.n_BX_total >= 0) ? rshift_round(bx_32, seg.n_BX_total)
+                                            : (bx_32 << (-seg.n_BX_total));
 
-    int32_t term_bx;
-    if (seg.n_BX_total >= 0) {
-        term_bx = rshift_round(bx_32, seg.n_BX_total);
-    } else {
-        term_bx = bx_32 << (-seg.n_BX_total);
-    }
-
+    // Step 5-6: q_y = term_bx + term_c; q_y = clamp(q_y, 0, 65535)
     int32_t y_32 = term_bx + seg.term_c_precomputed;
-    // Tanh 输出是有符号的 [-32768, 32767]
-    int32_t q_y = max(-32768, min(32767, y_32));
-
-    return static_cast<int16_t>(q_y);
+    return static_cast<uint16_t>(max(0, min(65535, y_32)));
 }
 
-// Sigmoid 分段线性计算（UINT8 版本，接受 LUT 参数）
-__device__ __forceinline__ uint8_t sigmoid_piecewise_linear_int8(uint8_t q_x,
+/**
+ * @brief Tanh 分段线性近似（INT16 版本）
+ * @param q_x 量化输入，int16_t [-32768, 32767]
+ * @param lut 分段线性查找表
+ * @return 量化输出，int16_t [-32768, 32767]（tanh ∈ [-1, 1] 为有符号）
+ */
+__device__ __forceinline__ int16_t tanh_piecewise_linear_int16(int16_t q_x,
+                                                               const SigmoidLUT_INT16& lut) {
+    // Step 1: seg_id = find_segment(q_x)
+    int seg_id = find_segment_int16(q_x, lut.segments);
+    const SegmentParams_INT16& seg = lut.segments[seg_id];
+
+    // Step 2: x_offset = q_x - zp_x
+    int32_t x_offset = static_cast<int32_t>(q_x) - static_cast<int32_t>(lut.zp_x);
+
+    // Step 3-4: bx = q_b * x_offset; term_bx = bx >> n_BX_total
+    int32_t bx_32 = static_cast<int32_t>(seg.q_b) * x_offset;
+    int32_t term_bx = (seg.n_BX_total >= 0) ? rshift_round(bx_32, seg.n_BX_total)
+                                            : (bx_32 << (-seg.n_BX_total));
+
+    // Step 5-6: q_y = term_bx + term_c; q_y = clamp(q_y, -32768, 32767)
+    int32_t y_32 = term_bx + seg.term_c_precomputed;
+    return static_cast<int16_t>(max(-32768, min(32767, y_32)));
+}
+
+/**
+ * @brief Sigmoid 分段线性近似（INT8 版本）
+ * @param q_x 量化输入，int8_t [-128, 127]
+ * @param lut 分段线性查找表
+ * @return 量化输出，uint8_t [0, 255]（sigmoid ∈ [0, 1] 为无符号）
+ */
+__device__ __forceinline__ uint8_t sigmoid_piecewise_linear_int8(int8_t q_x,
                                                                  const SigmoidLUT_INT8& lut) {
-    // [1] 段查找（输入已经是 uint8_t [0, 255]）
+    // Step 1: seg_id = find_segment(q_x)
     int seg_id = find_segment_int8(q_x, lut.segments);
     const SegmentParams_INT8& seg = lut.segments[seg_id];
 
-    // [2] 去零点
-    // 🔥 修正：使用 int32_t 避免溢出（q_x 是 uint8_t [0, 255]，zp_x 可能是正数）
+    // Step 2: x_offset = q_x - zp_x
     int32_t x_offset = static_cast<int32_t>(q_x) - static_cast<int32_t>(lut.zp_x);
 
-    // [3] 乘法 + 移位融合
-    // 公式: term_bx = (q_b * x_offset) >> n_BX_total
+    // Step 3-4: bx = q_b * x_offset; term_bx = bx >> n_BX_total
     int32_t bx_32 = static_cast<int32_t>(seg.q_b) * x_offset;
+    int32_t term_bx = (seg.n_BX_total >= 0) ? rshift_round(bx_32, seg.n_BX_total)
+                                            : (bx_32 << (-seg.n_BX_total));
 
-    int32_t term_bx;
-    if (seg.n_BX_total >= 0) {
-        // 右移
-        term_bx = rshift_round(bx_32, seg.n_BX_total);
-    } else {
-        // 左移（n_BX_total < 0）
-        term_bx = bx_32 << (-seg.n_BX_total);
-    }
-
-    // [4] 相加（term_c 已预计算）
+    // Step 5-6: q_y = term_bx + term_c; q_y = clamp(q_y, 0, 255)
     int32_t y_32 = term_bx + static_cast<int32_t>(seg.term_c_precomputed);
-
-    // [5] 饱和到 UINT8 范围 [0, 255]（根据 Python 参考，非对称量化使用无符号整数）
-    int32_t q_y = max(0, min(255, y_32));
-
-    return static_cast<uint8_t>(q_y);
+    return static_cast<uint8_t>(max(0, min(255, y_32)));
 }
 
-// Tanh 分段线性计算（INT8 版本）
-// 输入：int8（有符号），输出：int8（有符号）
-__device__ __forceinline__ int8_t tanh_piecewise_linear_int8(uint8_t q_x, const TanhLUT_INT8& lut) {
-    // [1] 段查找（输入是 uint8_t [0, 255]）
+/**
+ * @brief Tanh 分段线性近似（INT8 版本）
+ * @param q_x 量化输入，int8_t [-128, 127]
+ * @param lut 分段线性查找表
+ * @return 量化输出，int8_t [-128, 127]（tanh ∈ [-1, 1] 为有符号）
+ */
+__device__ __forceinline__ int8_t tanh_piecewise_linear_int8(int8_t q_x,
+                                                             const SigmoidLUT_INT8& lut) {
+    // Step 1: seg_id = find_segment(q_x)
     int seg_id = find_segment_int8(q_x, lut.segments);
     const SegmentParams_INT8& seg = lut.segments[seg_id];
 
-    // [2] 去零点
+    // Step 2: x_offset = q_x - zp_x
     int32_t x_offset = static_cast<int32_t>(q_x) - static_cast<int32_t>(lut.zp_x);
 
-    // [3] 乘法 + 移位融合
+    // Step 3-4: bx = q_b * x_offset; term_bx = bx >> n_BX_total
     int32_t bx_32 = static_cast<int32_t>(seg.q_b) * x_offset;
+    int32_t term_bx = (seg.n_BX_total >= 0) ? rshift_round(bx_32, seg.n_BX_total)
+                                            : (bx_32 << (-seg.n_BX_total));
 
-    int32_t term_bx;
-    if (seg.n_BX_total >= 0) {
-        term_bx = rshift_round(bx_32, seg.n_BX_total);
-    } else {
-        term_bx = bx_32 << (-seg.n_BX_total);
-    }
-
-    // [4] 相加（term_c 已预计算）
+    // Step 5-6: q_y = term_bx + term_c; q_y = clamp(q_y, -128, 127)
     int32_t y_32 = term_bx + static_cast<int32_t>(seg.term_c_precomputed);
-
-    // [5] Tanh 输出是有符号的 [-128, 127]
-    int32_t q_y = max(-128, min(127, y_32));
-
-    return static_cast<int8_t>(q_y);
+    return static_cast<int8_t>(max(-128, min(127, y_32)));
 }
 
 }  // namespace dev

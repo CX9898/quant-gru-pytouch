@@ -5,21 +5,47 @@
 #include <cstdio>
 #include <stdexcept>
 
-#include "quantize_ops_helper.hpp"
 #include "parallelAlgorithm.h"
+#include "quantize_ops_helper.hpp"
 
-void calibrateGruScales(bool use_int16, int time_steps, int batch_size, int input_size,
-                        int hidden_size, const std::vector<float> &W, const std::vector<float> &R,
-                        const std::vector<float> &bx, const std::vector<float> &br,
-                        const std::vector<float> &x, const cublasHandle_t &g_blas_handle,
-                        GRUQuantitativeParameters &quant_gru_scales) {
-    // Copy weights over to GPU.
-    dev::vector<float> W_dev(W);
-    dev::vector<float> R_dev(R);
-    dev::vector<float> bx_dev(bx);
-    dev::vector<float> br_dev(br);
-    dev::vector<float> x_dev(x);
+// void calibrateGruScales(int time_steps, int batch_size, int input_size,
+//                         int hidden_size, const std::vector<float> &W, const std::vector<float>
+//                         &R, const std::vector<float> &bx, const std::vector<float> &br, const
+//                         std::vector<float> &x, const cublasHandle_t &g_blas_handle,
+//                         GRUQuantitativeParameters &quant_gru_scales,
+//                         const OperatorQuantConfig &bitwidth_config) {
+//     // Copy weights over to GPU.
+//     dev::vector<float> W_dev(W);
+//     dev::vector<float> R_dev(R);
+//     dev::vector<float> bx_dev(bx);
+//     dev::vector<float> br_dev(br);
+//     dev::vector<float> x_dev(x);
+//
+//     dev::vector<float> h_dev((time_steps + 1) * batch_size * hidden_size);
+//     dev::vector<float> tmp_Wx_dev(time_steps * batch_size * hidden_size * 3);
+//     dev::vector<float> tmp_Rh_dev(time_steps * batch_size * hidden_size * 3);
+//     dev::vector<float> v_dev(time_steps * batch_size * hidden_size * 4);
+//
+//     h_dev.zero();
+//
+//     gru::ForwardPass<float> forward =
+//         gru::ForwardPass<float>(true,  // training
+//                                 batch_size, input_size, hidden_size, g_blas_handle);
+//
+//     forward.setCalibrationMode(true, bitwidth_config);
+//
+//     forward.Run(time_steps, W_dev.data(), R_dev.data(), bx_dev.data(), br_dev.data(),
+//     x_dev.data(),
+//                 h_dev.data(), v_dev.data(), tmp_Wx_dev.data(), tmp_Rh_dev.data(), 0.0f, nullptr);
+//
+//     quant_gru_scales = forward.getGRUQuantitativeParameters();
+// }
 
+GRUQuantitativeParameters calibrateGruScales(int time_steps, int batch_size, int input_size,
+                                             int hidden_size, const float *W, const float *R,
+                                             const float *bx, const float *br, const float *x,
+                                             const cublasHandle_t &g_blas_handle,
+                                             const OperatorQuantConfig &bitwidth_config) {
     dev::vector<float> h_dev((time_steps + 1) * batch_size * hidden_size);
     dev::vector<float> tmp_Wx_dev(time_steps * batch_size * hidden_size * 3);
     dev::vector<float> tmp_Rh_dev(time_steps * batch_size * hidden_size * 3);
@@ -31,30 +57,7 @@ void calibrateGruScales(bool use_int16, int time_steps, int batch_size, int inpu
         gru::ForwardPass<float>(true,  // training
                                 batch_size, input_size, hidden_size, g_blas_handle);
 
-    forward.setCalibrationMode(true, use_int16);
-
-    forward.Run(time_steps, W_dev.data(), R_dev.data(), bx_dev.data(), br_dev.data(), x_dev.data(),
-                h_dev.data(), v_dev.data(), tmp_Wx_dev.data(), tmp_Rh_dev.data(), 0.0f, nullptr);
-
-    quant_gru_scales = forward.getGRUQuantitativeParameters();
-}
-
-GRUQuantitativeParameters calibrateGruScales(bool use_int16, int time_steps, int batch_size,
-                                             int input_size, int hidden_size, const float *W,
-                                             const float *R, const float *bx, const float *br,
-                                             const float *x, const cublasHandle_t &g_blas_handle) {
-    dev::vector<float> h_dev((time_steps + 1) * batch_size * hidden_size);
-    dev::vector<float> tmp_Wx_dev(time_steps * batch_size * hidden_size * 3);
-    dev::vector<float> tmp_Rh_dev(time_steps * batch_size * hidden_size * 3);
-    dev::vector<float> v_dev(time_steps * batch_size * hidden_size * 4);
-
-    h_dev.zero();
-
-    gru::ForwardPass<float> forward =
-        gru::ForwardPass<float>(true,  // training
-                                batch_size, input_size, hidden_size, g_blas_handle);
-
-    forward.setCalibrationMode(true, use_int16);
+    forward.setCalibrationMode(true, bitwidth_config);
 
     forward.Run(time_steps, W, R, bx, br, x, h_dev.data(), v_dev.data(), tmp_Wx_dev.data(),
                 tmp_Rh_dev.data(), 0.0f, nullptr);
@@ -75,32 +78,29 @@ GRUQuantitativeParameters calibrateGruScales(bool use_int16, int time_steps, int
 }
 
 // 校准量化参数并初始化 LUT 表（组合函数，方便使用）
-// 内部会根据 use_int16 参数自动选择相应的 LUT 初始化方法
-GRUQuantitativeParameters calibrateGruScalesAndInitLut(bool use_int16, int time_steps,
-                                                       int batch_size, int input_size,
-                                                       int hidden_size, const float *W,
-                                                       const float *R, const float *bx,
-                                                       const float *br, const float *x,
-                                                       const cublasHandle_t &g_blas_handle) {
+GRUQuantitativeParameters calibrateGruScalesAndInitLut(
+    int time_steps, int batch_size, int input_size, int hidden_size, const float *W, const float *R,
+    const float *bx, const float *br, const float *x, const cublasHandle_t &g_blas_handle,
+    const OperatorQuantConfig &bitwidth_config) {
     // 先校准量化参数
-    GRUQuantitativeParameters quant_params = calibrateGruScales(
-        use_int16, time_steps, batch_size, input_size, hidden_size, W, R, bx, br, x, g_blas_handle);
+    GRUQuantitativeParameters quant_params =
+        calibrateGruScales(time_steps, batch_size, input_size, hidden_size, W, R, bx, br, x,
+                           g_blas_handle, bitwidth_config);
 
-    // 初始化 LUT 表（根据 bitwidth_config 自动选择方法）
+    // 初始化 LUT 表（根据 bitwidth_config_ 自动选择方法）
     initialize_quantization_lut(quant_params);
 
     return quant_params;
 }
 
-void hasteGRUForward(bool is_training,  // 是否开启训练模式，true为训练，false为推理
-                     const int time_steps, const int batch_size, const int input_size,
-                     const int hidden_size, const float *W, const float *R, const float *bx,
-                     const float *br, const float *x,
-                     const float *h0,  // 初始隐藏状态，可以为 nullptr
-                     const cublasHandle_t &g_blas_handle,
-                     float *h,  // (time_steps + 1) * batch_size * hidden_size
-                     float *v   // (time_steps * batch_size * hidden_size * 4)，中间值v，可以为
-                                // nullptr
+void hasteGRUForward(
+    bool is_training,  // 是否开启训练模式，true为训练，false为推理
+    const int time_steps, const int batch_size, const int input_size, const int hidden_size,
+    const float *W, const float *R, const float *bx, const float *br, const float *x,
+    const float *h0,  // 初始隐藏状态，可以为 nullptr
+    const cublasHandle_t &g_blas_handle,
+    float *h,  // (time_steps + 1) * batch_size * hidden_size
+    float *v   // (time_steps * batch_size * hidden_size * 4)，中间值v，可以为 nullptr
 ) {
     dev::vector<float> tmp_Wx_dev(time_steps * batch_size * hidden_size *
                                   3);                             // 用于存放W * x的中间结果
@@ -124,19 +124,19 @@ void hasteGRUForward(bool is_training,  // 是否开启训练模式，true为训
                 nullptr);
 }
 
-void hasteGRUBackward(const int time_steps, const int batch_size, const int input_size,
-                      const int hidden_size, const float *W, const float *R, const float *bx,
-                      const float *br, const float *x, const float *dh_new,
-                      const float *h,  // (time_steps + 1) * batch_size * hidden_size
-                      const float *v,  // (time_steps * batch_size * hidden_size *
-                                       // 4)，中间值v，可以为 nullptr
-                      const cublasHandle_t &g_blas_handle,
-                      float *dx,   // (time_steps *batch_size * input_size) 输入序列梯度
-                      float *dW,   // (input_size * hidden_size * 3)// 对输入权重的梯度
-                      float *dR,   // (hidden_size * hidden_size * 3) // 对循环权重的梯度
-                      float *dbx,  // (hidden_size * 3)// 对输入偏置的梯度
-                      float *dbr,  // (hidden_size * 3)// 对循环偏置的梯度
-                      float *dh    // (batch_size * hidden_size)// 对最后隐藏状态的梯度
+void hasteGRUBackward(
+    const int time_steps, const int batch_size, const int input_size, const int hidden_size,
+    const float *W, const float *R, const float *bx, const float *br, const float *x,
+    const float *dh_new,
+    const float *h,  // (time_steps + 1) * batch_size * hidden_size
+    const float *v,  // (time_steps * batch_size * hidden_size * 4)，中间值v，可以为 nullptr
+    const cublasHandle_t &g_blas_handle,
+    float *dx,   // (time_steps *batch_size * input_size) 输入序列梯度
+    float *dW,   // (input_size * hidden_size * 3)// 对输入权重的梯度
+    float *dR,   // (hidden_size * hidden_size * 3) // 对循环权重的梯度
+    float *dbx,  // (hidden_size * 3)// 对输入偏置的梯度
+    float *dbr,  // (hidden_size * 3)// 对循环偏置的梯度
+    float *dh    // (batch_size * hidden_size)// 对最后隐藏状态的梯度
 ) {
     dev::vector<float> dp_dev(time_steps * batch_size * hidden_size *
                               3);  // 临时缓存梯度（内部结构用）
@@ -155,10 +155,10 @@ void quantitativeWeight(const int input_size, const int hidden_size, const float
                         const GRUQuantitativeParameters &quant_parms, QuantT *W_quant,
                         QuantT *R_quant, int32_t *bx_quant, int32_t *br_quant) {
     // 显式创建dev::vector以避免临时对象问题
-    dev::vector<int32_t> exp2_inv_W_dev(quant_parms.exp2_inv_W_);
-    dev::vector<int32_t> exp2_inv_R_dev(quant_parms.exp2_inv_R_);
-    dev::vector<int32_t> exp2_inv_bx_dev(quant_parms.exp2_inv_bx_);
-    dev::vector<int32_t> exp2_inv_br_dev(quant_parms.exp2_inv_br_);
+    dev::vector<int8_t> exp2_inv_W_dev(quant_parms.exp2_inv_W_);
+    dev::vector<int8_t> exp2_inv_R_dev(quant_parms.exp2_inv_R_);
+    dev::vector<int8_t> exp2_inv_bx_dev(quant_parms.exp2_inv_bx_);
+    dev::vector<int8_t> exp2_inv_br_dev(quant_parms.exp2_inv_br_);
 
     dev::quantificationPerChannel(W, W_quant, input_size, 3 * hidden_size, exp2_inv_W_dev);
     dev::quantificationPerChannel(R, R_quant, hidden_size, 3 * hidden_size, exp2_inv_R_dev);
@@ -167,16 +167,14 @@ void quantitativeWeight(const int input_size, const int hidden_size, const float
 }
 
 template <typename QuantT>
-void quantGRUForward(bool is_training,  // 是否开启训练模式，true为训练，false为推理
-                     const int time_steps, const int batch_size, const int input_size,
-                     const int hidden_size, const QuantT *W, const QuantT *R, const int32_t *bx,
-                     const int32_t *br, const float *x,
-                     const float *h0,  // 初始隐藏状态，可以为 nullptr
-                     const GRUQuantitativeParameters &quant_parms,
-                     const cublasHandle_t &g_blas_handle,
-                     float *h,  // (time_steps + 1) * batch_size * hidden_size
-                     float *v   // (time_steps * batch_size * hidden_size *
-                                // 4)，反量化后的v，可以为 nullptr
+void quantGRUForward(
+    bool is_training,  // 是否开启训练模式，true为训练，false为推理
+    const int time_steps, const int batch_size, const int input_size, const int hidden_size,
+    const QuantT *W, const QuantT *R, const int32_t *bx, const int32_t *br, const float *x,
+    const float *h0,  // 初始隐藏状态，可以为 nullptr
+    const GRUQuantitativeParameters &quant_parms, const cublasHandle_t &g_blas_handle,
+    float *h,  // (time_steps + 1) * batch_size * hidden_size
+    float *v   // (time_steps * batch_size * hidden_size * 4)，反量化后的v，可以为 nullptr
 ) {
     const std::size_t x_size = time_steps * batch_size * input_size;
 
@@ -194,21 +192,28 @@ void quantGRUForward(bool is_training,  // 是否开启训练模式，true为训
                             quant_parms.zp_h_);
     }
 
+    dev::vector<int32_t> v_quant_dev(time_steps * batch_size * hidden_size *
+                                     4);  // v 统一使用 int32_t 存储
     dev::vector<int32_t> tmp_Wx_dev(time_steps * batch_size * hidden_size *
                                     3);                             // 用于存放W * x的中间结果
     dev::vector<int32_t> tmp_Rh_dev(batch_size * hidden_size * 3);  // 用于存放R * h的中间结果
 
-    gru::ForwardPassQuant<QuantT> forward =
-        gru::ForwardPassQuant<QuantT>(is_training,  // training: true为训练，false为推理
-                                      batch_size, input_size, hidden_size, g_blas_handle);
+    gru::ForwardPassQuant<QuantT, QuantT, QuantT, QuantT> forward =
+        gru::ForwardPassQuant<QuantT, QuantT, QuantT, QuantT>(
+            is_training,  // training: true为训练，false为推理
+            batch_size, input_size, hidden_size, g_blas_handle);
 
     // 得到量化GRU中使用的rescale参数
     forward.setRescaleParam(quant_parms);
 
-    if (is_training) {
-        dev::vector<QuantT> v_quant_dev(time_steps * batch_size * hidden_size * 4);
-        forward.Run(time_steps, W, R, bx, br, x_quant.data(), h_quant.data(), v_quant_dev.data(),
-                    tmp_Wx_dev.data(), tmp_Rh_dev.data(), 0.0f, nullptr);
+    forward.Run(time_steps, W, R, bx, br, x_quant.data(), h_quant.data(), v_quant_dev.data(),
+                tmp_Wx_dev.data(), tmp_Rh_dev.data(), 0.0f, nullptr);
+
+    dev::dequantification(h_quant.data(), h, (time_steps + 1) * batch_size * hidden_size,
+                          quant_parms.exp2_inv_h_, quant_parms.zp_h_);
+
+    // 如果v不为nullptr，反量化v并输出
+    if (v != nullptr) {
         dev::dequantificationV(v_quant_dev.data(), v, time_steps, batch_size, hidden_size,
                                quant_parms.exp2_inv_z_out_, quant_parms.zp_z_out_,
                                quant_parms.exp2_inv_r_out_, quant_parms.zp_r_out_,
@@ -222,18 +227,18 @@ void quantGRUForward(bool is_training,  // 是否开启训练模式，true为训
     dev::dequantification(h_quant.data(), h, h_quant.size(), quant_parms.exp2_inv_h_, quant_parms.zp_h_);
 }
 
-void forwardInterface(bool is_training,  // 是否开启训练模式，true为训练，false为推理
-                      bool is_quant, bool use_int16, int time_steps, int batch_size, int input_size,
-                      int hidden_size, const float *W, const float *R, const float *bx,
-                      const float *br, const float *x,
-                      const float *h0,  // 初始隐藏状态，可以为 nullptr
-                      const GRUQuantitativeParameters &quant_gru_scales,
-                      const cublasHandle_t &g_blas_handle,
-                      float *h,    // (time_steps + 1) * batch_size * hidden_size，包含初始状态
-                      float *v) {  // (time_steps * batch_size * hidden_size * 4)，中间值v，可以为
-                                   // nullptr
+void forwardInterface(
+    bool is_training,  // 是否开启训练模式，true为训练，false为推理
+    bool is_quant, int time_steps, int batch_size, int input_size, int hidden_size, const float *W,
+    const float *R, const float *bx, const float *br, const float *x,
+    const float *h0,  // 初始隐藏状态，可以为 nullptr
+    const GRUQuantitativeParameters &quant_gru_scales, const cublasHandle_t &g_blas_handle,
+    float *h,    // (time_steps + 1) * batch_size * hidden_size，包含初始状态
+    float *v) {  // (time_steps * batch_size * hidden_size * 4)，中间值v，可以为 nullptr
     if (is_quant) {
-        if (use_int16) {
+        // 根据 bitwidth_config_.W_ 决定权重量化位宽
+        const auto &config = quant_gru_scales.bitwidth_config_;
+        if (config.W_ == QuantBitWidth::INT16) {
             dev::vector<int16_t> W_quant(hidden_size * 3 * input_size);
             dev::vector<int16_t> R_quant(hidden_size * 3 * hidden_size);
             dev::vector<int32_t> bx_quant(hidden_size * 3);
@@ -343,38 +348,32 @@ template void quantGRUForward<int16_t>(bool is_training, const int time_steps, c
                                        const GRUQuantitativeParameters &quant_parms,
                                        const cublasHandle_t &g_blas_handle, float *h, float *v);
 
-// 辅助函数：判断是否为16位量化
-inline bool is_16bit(QuantBitWidth bw) {
-    return bw == QuantBitWidth::INT16 || bw == QuantBitWidth::UINT16;
-}
-
 // 初始化量化 LUT 表（仅在初始化时调用一次）
-// 根据 OperatorQuantConfig 中每个门的 out_bitwidth 独立选择 LUT 类型
+// 接收量化参数对象，内部根据 bitwidth_config_ 自动选择相应的 LUT 初始化方法
 void initialize_quantization_lut(const GRUQuantitativeParameters &quant_params) {
-    const auto &cfg = quant_params.bitwidth_config_;
-
-    // 生成分段线性 LUT（内部根据 bitwidth_config 自动选择每个门的类型）
-//    generate_piecewise_linear_lut_from_exp2_inv(quant_params);
-
-    // 如果全部使用 8 位，还需要初始化传统的 int8 LUT 表
-    bool z_use_16bit = is_16bit(cfg.z_out_bitwidth);
-    bool r_use_16bit = is_16bit(cfg.r_out_bitwidth);
-    bool g_use_16bit = is_16bit(cfg.g_out_bitwidth);
-
-    if (!z_use_16bit && !r_use_16bit && !g_use_16bit) {
+    const auto &config = quant_params.bitwidth_config_;
+    // 根据 z_pre_ 的位宽选择 LUT 类型（假设所有门使用相同的位宽）
+    if (config.z_pre_ == QuantBitWidth::INT16) {
+        // int16 使用分段线性量化表
+        generate_piecewise_linear_lut_from_exp2_inv<int16_t>(
+            quant_params.exp2_inv_z_pre_, quant_params.zp_z_pre_, quant_params.exp2_inv_z_out_,
+            quant_params.zp_z_out_, quant_params.exp2_inv_r_pre_, quant_params.zp_r_pre_,
+            quant_params.exp2_inv_r_out_, quant_params.zp_r_out_, quant_params.exp2_inv_g_pre_,
+            quant_params.zp_g_pre_, quant_params.exp2_inv_g_out_, quant_params.zp_g_out_);
+    } else {
+        // int8：同时初始化传统 LUT 表和分段线性 LUT
+        // 传统 LUT（用于非 USE_LINER 编译）
         generate_int8_lut_from_exp2_inv(
             quant_params.exp2_inv_z_pre_, quant_params.zp_z_pre_, quant_params.exp2_inv_z_out_,
             quant_params.zp_z_out_, quant_params.exp2_inv_r_pre_, quant_params.zp_r_pre_,
             quant_params.exp2_inv_r_out_, quant_params.zp_r_out_, quant_params.exp2_inv_g_pre_,
             quant_params.zp_g_pre_, quant_params.exp2_inv_g_out_, quant_params.zp_g_out_);
 
-        // 检查是否需要 uint8 sigmoid LUT（z/r 输出使用 UINT8）
-        if (cfg.z_out_bitwidth == QuantBitWidth::UINT8 ||
-            cfg.r_out_bitwidth == QuantBitWidth::UINT8) {
-            generate_uint8_lut_from_exp2_inv(quant_params.exp2_inv_z_pre_, quant_params.zp_z_pre_,
-                                             quant_params.exp2_inv_z_out_, quant_params.zp_z_out_,
-                                             quant_params.exp2_inv_r_pre_, quant_params.zp_r_pre_,
-                                             quant_params.exp2_inv_r_out_, quant_params.zp_r_out_);
-        }
+        // 分段线性 LUT（用于 USE_LINER 编译）
+        generate_piecewise_linear_lut_from_exp2_inv<int8_t>(
+            quant_params.exp2_inv_z_pre_, quant_params.zp_z_pre_, quant_params.exp2_inv_z_out_,
+            quant_params.zp_z_out_, quant_params.exp2_inv_r_pre_, quant_params.zp_r_pre_,
+            quant_params.exp2_inv_r_out_, quant_params.zp_r_out_, quant_params.exp2_inv_g_pre_,
+            quant_params.zp_g_pre_, quant_params.exp2_inv_g_out_, quant_params.zp_g_out_);
     }
 }

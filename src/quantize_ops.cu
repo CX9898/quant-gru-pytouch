@@ -20,28 +20,26 @@ struct SigmoidLUT_INT8;
 struct TanhLUT_INT16;
 struct TanhLUT_INT8;
 
-__constant__ int8_t d_sigmoid_int8_z_lut[256];
-__constant__ int8_t d_sigmoid_int8_r_lut[256];
-__constant__ int8_t d_tanh_int8_g_lut[256];
+__constant__ uint8_t d_sigmoid_int8_z_lut[256];  // sigmoid 输出 [0,1] 使用无符号
+__constant__ uint8_t d_sigmoid_int8_r_lut[256];  // sigmoid 输出 [0,1] 使用无符号
+__constant__ int8_t d_tanh_int8_g_lut[256];      // tanh 输出 [-1,1] 仍使用有符号
 
 // uint8 版本的 sigmoid LUT（输出范围 [0, 255]，适用于 sigmoid 输出）
 __constant__ uint8_t d_sigmoid_uint8_z_lut[256];
 __constant__ uint8_t d_sigmoid_uint8_r_lut[256];
 
 // 分段线性量化常量内存
-// Sigmoid LUT（z/r 门）- 输入 int，输出 uint
-__constant__ SigmoidLUT_INT16 d_sigmoid_z_lut_int16;
-__constant__ SigmoidLUT_INT16 d_sigmoid_r_lut_int16;
-__constant__ SigmoidLUT_INT8 d_sigmoid_z_lut_int8;
-__constant__ SigmoidLUT_INT8 d_sigmoid_r_lut_int8;
+__constant__ SigmoidLUT_INT16 d_sigmoid_z_lut_int16;  // z 门的 Sigmoid LUT
+__constant__ SigmoidLUT_INT16 d_sigmoid_r_lut_int16;  // r 门的 Sigmoid LUT
+__constant__ SigmoidLUT_INT16 d_tanh_lut_int16;
+__constant__ SigmoidLUT_INT8 d_sigmoid_z_lut_int8;  // z 门的 Sigmoid LUT
+__constant__ SigmoidLUT_INT8 d_sigmoid_r_lut_int8;  // r 门的 Sigmoid LUT
+__constant__ SigmoidLUT_INT8 d_tanh_lut_int8;
 
-// Tanh LUT（g 门）- 输入 int，输出 int
-__constant__ TanhLUT_INT16 d_tanh_lut_int16;
-__constant__ TanhLUT_INT8 d_tanh_lut_int8;
-
-std::vector<int8_t> generate_sigmoid_int8_lut(float scale_z_pre, int32_t zp_z_pre, float scale_z,
-                                              int32_t zp_z) {
-    std::vector<int8_t> lut(256);
+// sigmoid 输出使用 uint8_t，因为 sigmoid ∈ [0, 1] 没有负数
+std::vector<uint8_t> generate_sigmoid_int8_lut(float scale_z_pre, int32_t zp_z_pre, float scale_z,
+                                               int32_t zp_z) {
+    std::vector<uint8_t> lut(256);
 
     for (int i = 0; i < 256; i++) {
         int x_i8 = i - 128;
@@ -49,27 +47,7 @@ std::vector<int8_t> generate_sigmoid_int8_lut(float scale_z_pre, int32_t zp_z_pr
         const float x_fp = static_cast<float>(x_i8 - zp_z_pre) * scale_z_pre;
         const float y_fp = 1.f / (1.f + std::exp(-x_fp));
 
-        int y_i8 = static_cast<int>(std::round(y_fp / scale_z + zp_z));
-        if (y_i8 < -128) y_i8 = -128;
-        if (y_i8 > 127) y_i8 = 127;
-
-        lut[i] = static_cast<int8_t>(y_i8);
-    }
-    return lut;
-}
-
-// uint8 版本：sigmoid 输出范围 [0, 1] 映射到 [0, 255]
-std::vector<uint8_t> generate_sigmoid_uint8_lut(float scale_z_pre, int32_t zp_z_pre, float scale_z,
-                                                int32_t zp_z) {
-    std::vector<uint8_t> lut(256);
-
-    for (int i = 0; i < 256; i++) {
-        int x_i8 = i - 128;  // 输入仍然是 int8 范围
-
-        const float x_fp = static_cast<float>(x_i8 - zp_z_pre) * scale_z_pre;
-        const float y_fp = 1.f / (1.f + std::exp(-x_fp));
-
-        // 输出量化到 uint8 [0, 255]
+        // 输出使用 uint8_t 范围 [0, 255]
         int y_u8 = static_cast<int>(std::round(y_fp / scale_z + zp_z));
         if (y_u8 < 0) y_u8 = 0;
         if (y_u8 > 255) y_u8 = 255;
@@ -101,42 +79,27 @@ std::vector<int8_t> generate_tanh_int8_lut(float scale_pre, int32_t zp_pre, floa
 void generate_int8_lut(float scale_z_pre, int32_t zp_z_pre, float scale_z_out, int32_t zp_z_out,
                        float scale_r_pre, int32_t zp_r_pre, float scale_r_out, int32_t zp_r_out,
                        float scale_g_pre, int32_t zp_g_pre, float scale_g_out, int32_t zp_g_out) {
-    std::vector<int8_t> sigmoid_z_lut =
+    // sigmoid LUT 使用 uint8_t（输出 [0, 255]）
+    std::vector<uint8_t> sigmoid_z_lut =
         generate_sigmoid_int8_lut(scale_z_pre, zp_z_pre, scale_z_out, zp_z_out);
-    //    printf("scale_z_pre = %.15f, zp_z_pre = %d, scale_z_out = %.15f,
-    //    zp_z_out = %d\n",
-    //           scale_z_pre,
-    //           zp_z_pre,
-    //           scale_z_out,
-    //           zp_z_out);
-    std::vector<int8_t> sigmoid_r_lut =
+    std::vector<uint8_t> sigmoid_r_lut =
         generate_sigmoid_int8_lut(scale_r_pre, zp_r_pre, scale_r_out, zp_r_out);
-    //    printf("scale_r_pre = %.15f, zp_r_pre = %d, scale_r_out = %.15f,
-    //    zp_r_out = %d\n",
-    //           scale_r_pre,
-    //           zp_r_pre,
-    //           scale_r_out,
-    //           zp_r_out);
+    // tanh LUT 仍使用 int8_t（输出 [-128, 127]）
     std::vector<int8_t> tanh_int8_lut =
         generate_tanh_int8_lut(scale_g_pre, zp_g_pre, scale_g_out, zp_g_out);
-    //    printf("scale_g_pre = %.15f, zp_g_pre = %d, scale_g_out = %.15f,
-    //    zp_g_out = %d\n",
-    //           scale_g_pre,
-    //           zp_g_pre,
-    //           scale_g_out,
-    //           zp_g_out);
 
     cudaMemcpyToSymbol(d_sigmoid_int8_z_lut, sigmoid_z_lut.data(),
-                       sizeof(int8_t) * 256);  // 从host端拷贝到device端中编译期固定的地址
+                       sizeof(uint8_t) * 256);  // 从host端拷贝到device端中编译期固定的地址
     cudaMemcpyToSymbol(d_sigmoid_int8_r_lut, sigmoid_r_lut.data(),
-                       sizeof(int8_t) * 256);  // 从host端拷贝到device端中编译期固定的地址
+                       sizeof(uint8_t) * 256);  // 从host端拷贝到device端中编译期固定的地址
     cudaMemcpyToSymbol(d_tanh_int8_g_lut, tanh_int8_lut.data(),
-                       sizeof(int8_t) * 256);  // 从host端拷贝到device端中编译期固定的地址
+                       sizeof(int8_t) * 256);   // 从host端拷贝到device端中编译期固定的地址
 }
 
-std::vector<int8_t> generate_sigmoid_int8_lut_exp2(int32_t exp2_inv_z_pre, int32_t zp_z_pre,
-                                                   int32_t exp2_inv_z, int32_t zp_z) {
-    std::vector<int8_t> lut(256);
+// sigmoid 输出使用 uint8_t，因为 sigmoid ∈ [0, 1] 没有负数
+std::vector<uint8_t> generate_sigmoid_int8_lut_exp2(int8_t exp2_inv_z_pre, int32_t zp_z_pre,
+                                                    int8_t exp2_inv_z, int32_t zp_z) {
+    std::vector<uint8_t> lut(256);
 
     for (int i = 0; i < 256; i++) {
         int x_i8 = i - 128;
@@ -147,17 +110,17 @@ std::vector<int8_t> generate_sigmoid_int8_lut_exp2(int32_t exp2_inv_z_pre, int32
         // （2）计算 sigmoid
         float y_fp = 1.f / (1.f + std::exp(-x_fp));
 
-        // （3）量化 y
-        int y_i8 = quantize<int8_t>(y_fp, exp2_inv_z, zp_z);
+        // （3）量化 y 到 uint8_t 范围 [0, 255]
+        int y_u8 = quantize<uint8_t>(y_fp, exp2_inv_z, zp_z);
 
-        lut[i] = static_cast<int8_t>(y_i8);
+        lut[i] = static_cast<uint8_t>(y_u8);
     }
 
     return lut;
 }
 
-std::vector<int8_t> generate_tanh_int8_lut_exp2(int32_t exp2_inv_pre, int32_t zp_pre,
-                                                int32_t exp2_inv_out, int32_t zp_out) {
+std::vector<int8_t> generate_tanh_int8_lut_exp2(int8_t exp2_inv_pre, int32_t zp_pre,
+                                                int8_t exp2_inv_out, int32_t zp_out) {
     std::vector<int8_t> lut(256);
 
     for (int i = 0; i < 256; i++) {
@@ -178,74 +141,36 @@ std::vector<int8_t> generate_tanh_int8_lut_exp2(int32_t exp2_inv_pre, int32_t zp
     return lut;
 }
 
-// uint8 版本：sigmoid 输出量化到 [0, 255]
-std::vector<uint8_t> generate_sigmoid_uint8_lut_exp2(int32_t exp2_inv_z_pre, int32_t zp_z_pre,
-                                                     int32_t exp2_inv_z, int32_t zp_z) {
-    std::vector<uint8_t> lut(256);
-
-    for (int i = 0; i < 256; i++) {
-        int x_i8 = i - 128;  // 输入仍然是 int8 范围
-
-        // （1）反量化 x
-        float x_fp = dequantize(x_i8, exp2_inv_z_pre, zp_z_pre);
-
-        // （2）计算 sigmoid
-        float y_fp = 1.f / (1.f + std::exp(-x_fp));
-
-        // （3）量化 y 到 uint8
-        int y_u8 = quantize<uint8_t>(y_fp, exp2_inv_z, zp_z);
-
-        lut[i] = static_cast<uint8_t>(y_u8);
-    }
-
-    return lut;
-}
-
-void generate_uint8_lut_from_exp2_inv(int32_t exp2_inv_z_pre, int32_t zp_z_pre,
-                                      int32_t exp2_inv_z_out, int32_t zp_z_out,
-                                      int32_t exp2_inv_r_pre, int32_t zp_r_pre,
-                                      int32_t exp2_inv_r_out, int32_t zp_r_out) {
+void generate_int8_lut_from_exp2_inv(int8_t exp2_inv_z_pre, int32_t zp_z_pre, int8_t exp2_inv_z_out,
+                                     int32_t zp_z_out, int8_t exp2_inv_r_pre, int32_t zp_r_pre,
+                                     int8_t exp2_inv_r_out, int32_t zp_r_out, int8_t exp2_inv_g_pre,
+                                     int32_t zp_g_pre, int8_t exp2_inv_g_out, int32_t zp_g_out) {
+    // sigmoid LUT 使用 uint8_t（输出 [0, 255]）
     std::vector<uint8_t> sigmoid_z_lut =
-        generate_sigmoid_uint8_lut_exp2(exp2_inv_z_pre, zp_z_pre, exp2_inv_z_out, zp_z_out);
-    std::vector<uint8_t> sigmoid_r_lut =
-        generate_sigmoid_uint8_lut_exp2(exp2_inv_r_pre, zp_r_pre, exp2_inv_r_out, zp_r_out);
-
-    cudaMemcpyToSymbol(d_sigmoid_uint8_z_lut, sigmoid_z_lut.data(), sizeof(uint8_t) * 256);
-    cudaMemcpyToSymbol(d_sigmoid_uint8_r_lut, sigmoid_r_lut.data(), sizeof(uint8_t) * 256);
-}
-
-void generate_int8_lut_from_exp2_inv(int32_t exp2_inv_z_pre, int32_t zp_z_pre,
-                                     int32_t exp2_inv_z_out, int32_t zp_z_out,
-                                     int32_t exp2_inv_r_pre, int32_t zp_r_pre,
-                                     int32_t exp2_inv_r_out, int32_t zp_r_out,
-                                     int32_t exp2_inv_g_pre, int32_t zp_g_pre,
-                                     int32_t exp2_inv_g_out, int32_t zp_g_out) {
-    std::vector<int8_t> sigmoid_z_lut =
         generate_sigmoid_int8_lut_exp2(exp2_inv_z_pre, zp_z_pre, exp2_inv_z_out, zp_z_out);
-    std::vector<int8_t> sigmoid_r_lut =
+    std::vector<uint8_t> sigmoid_r_lut =
         generate_sigmoid_int8_lut_exp2(exp2_inv_r_pre, zp_r_pre, exp2_inv_r_out, zp_r_out);
+    // tanh LUT 仍使用 int8_t
     std::vector<int8_t> tanh_int8_lut =
         generate_tanh_int8_lut_exp2(exp2_inv_g_pre, zp_g_pre, exp2_inv_g_out, zp_g_out);
 
-    cudaMemcpyToSymbol(d_sigmoid_int8_z_lut, sigmoid_z_lut.data(), sizeof(int8_t) * 256);
-    cudaMemcpyToSymbol(d_sigmoid_int8_r_lut, sigmoid_r_lut.data(), sizeof(int8_t) * 256);
+    cudaMemcpyToSymbol(d_sigmoid_int8_z_lut, sigmoid_z_lut.data(), sizeof(uint8_t) * 256);
+    cudaMemcpyToSymbol(d_sigmoid_int8_r_lut, sigmoid_r_lut.data(), sizeof(uint8_t) * 256);
     cudaMemcpyToSymbol(d_tanh_int8_g_lut, tanh_int8_lut.data(), sizeof(int8_t) * 256);
 }
 
-// 生成分段线性量化表（基于 GRUQuantitativeParameters）
-// 根据 bitwidth_config_ 自动选择每个门的 LUT 类型
-// - z/r 门（sigmoid）输出是 uint8 或 uint16
-// - g 门（tanh）输出是 int8 或 int16
-void generate_piecewise_linear_lut_from_exp2_inv(const GRUQuantitativeParameters &params) {
-    const auto &cfg = params.bitwidth_config_;
-
-    // 辅助函数：判断是否为16位量化
-    auto is_16bit = [](QuantBitWidth bw) {
-        return bw == QuantBitWidth::INT16 || bw == QuantBitWidth::UINT16;
-    };
-
-    // 从量化参数计算 scale
-    auto calculate_scale = [](int32_t exp2_inv) -> float {
+// 生成分段线性量化表（基于exp2_inv参数，支持模板类型）
+// exp2_inv 就是 shift_bits（因为 scale = 2^(-exp2_inv) = 2^(-shift_bits)）
+template <typename QuantT>
+void generate_piecewise_linear_lut_from_exp2_inv(int8_t exp2_inv_z_pre, int32_t zp_z_pre,
+                                                 int8_t exp2_inv_z_out, int32_t zp_z_out,
+                                                 int8_t exp2_inv_r_pre, int32_t zp_r_pre,
+                                                 int8_t exp2_inv_r_out, int32_t zp_r_out,
+                                                 int8_t exp2_inv_g_pre, int32_t zp_g_pre,
+                                                 int8_t exp2_inv_g_out, int32_t zp_g_out) {
+    // 从量化参数计算 min 和 max
+    // scale = 2^(-exp2_inv) = 1.0f / (1 << exp2_inv)
+    auto calculate_scale = [](int8_t exp2_inv) -> float {
         if (exp2_inv >= 0) {
             return 1.0f / static_cast<float>(1 << exp2_inv);
         } else {
@@ -253,77 +178,57 @@ void generate_piecewise_linear_lut_from_exp2_inv(const GRUQuantitativeParameters
         }
     };
 
-    // 判断每个门使用 8 位还是 16 位
-    bool z_use_16bit = is_16bit(cfg.z_out_bitwidth);
-    bool r_use_16bit = is_16bit(cfg.r_out_bitwidth);
-    bool g_use_16bit = is_16bit(cfg.g_out_bitwidth);
-
-    // 获取每个门的量化范围（sigmoid 输出是 uint，tanh 输出是 int）
-    // z 门：uint8 [0, 255] 或 uint16 [0, 65535]
-    int32_t z_quant_min = 0;
-    int32_t z_quant_max = z_use_16bit ? 65535 : 255;
-
-    // r 门：uint8 [0, 255] 或 uint16 [0, 65535]
-    int32_t r_quant_min = 0;
-    int32_t r_quant_max = r_use_16bit ? 65535 : 255;
-
-    // g 门（tanh）：int8 [-128, 127] 或 int16 [-32768, 32767]
-    int32_t g_quant_min = g_use_16bit ? -32768 : -128;
-    int32_t g_quant_max = g_use_16bit ? 32767 : 127;
-
-    // 计算每个门的输入范围
-    float scale_z_pre = calculate_scale(params.exp2_inv_z_pre_);
-    float x_min_z = static_cast<float>(z_quant_min - params.zp_z_pre_) * scale_z_pre;
-    float x_max_z = static_cast<float>(z_quant_max - params.zp_z_pre_) * scale_z_pre;
-
-    float scale_r_pre = calculate_scale(params.exp2_inv_r_pre_);
-    float x_min_r = static_cast<float>(r_quant_min - params.zp_r_pre_) * scale_r_pre;
-    float x_max_r = static_cast<float>(r_quant_max - params.zp_r_pre_) * scale_r_pre;
-
-    float scale_g_pre = calculate_scale(params.exp2_inv_g_pre_);
-    float x_min_g = static_cast<float>(g_quant_min - params.zp_g_pre_) * scale_g_pre;
-    float x_max_g = static_cast<float>(g_quant_max - params.zp_g_pre_) * scale_g_pre;
-
-    // 转换为 shift_bits
-    int8_t shift_bits_z_pre =
-        static_cast<int8_t>(std::max(0, std::min(127, params.exp2_inv_z_pre_)));
-    int8_t shift_bits_z_out =
-        static_cast<int8_t>(std::max(0, std::min(127, params.exp2_inv_z_out_)));
-    int8_t shift_bits_r_pre =
-        static_cast<int8_t>(std::max(0, std::min(127, params.exp2_inv_r_pre_)));
-    int8_t shift_bits_r_out =
-        static_cast<int8_t>(std::max(0, std::min(127, params.exp2_inv_r_out_)));
-    int8_t shift_bits_g_pre =
-        static_cast<int8_t>(std::max(0, std::min(127, params.exp2_inv_g_pre_)));
-    int8_t shift_bits_g_out =
-        static_cast<int8_t>(std::max(0, std::min(127, params.exp2_inv_g_out_)));
-
-    // ========== Z 门 LUT 初始化（sigmoid，输出 uint）==========
-    if (z_use_16bit) {
-        init_sigmoid_z_lut_int16(shift_bits_z_pre, params.zp_z_pre_,
-                                 shift_bits_z_out, params.zp_z_out_, x_min_z,
-                                 x_max_z);
+    // 🔥 关键修正：C++ 实现中，sigmoid/tanh 的输入是有符号整数（来自 clamp<int8_t/int16_t>）
+    // 所以应该使用有符号整数范围：[-128, 127] 或 [-32768, 32767]
+    // 注意：这与 Python 参考不同，Python 参考使用无符号整数范围
+    int32_t quant_min, quant_max;
+    if constexpr (std::is_same_v<QuantT, int8_t>) {
+        // 对于 int8_t，输入使用有符号范围 [-128, 127]
+        quant_min = -128;
+        quant_max = 127;
+    } else if constexpr (std::is_same_v<QuantT, int16_t>) {
+        // 对于 int16_t，输入使用有符号范围 [-32768, 32767]
+        quant_min = -32768;
+        quant_max = 32767;
     } else {
-        init_sigmoid_z_lut_int8(shift_bits_z_pre, params.zp_z_pre_,
-                                shift_bits_z_out, params.zp_z_out_, x_min_z,
+        // 默认情况（不应该到达这里）
+        quant_min = static_cast<int32_t>(std::numeric_limits<QuantT>::min());
+        quant_max = static_cast<int32_t>(std::numeric_limits<QuantT>::max());
+    }
+
+    // 计算每个门的输入范围（使用 pre 的量化参数）
+    // 公式：x = (q - zp) * scale，其中 q ∈ [quant_min, quant_max]
+    float scale_z_pre = calculate_scale(exp2_inv_z_pre);
+    float x_min_z = static_cast<float>(quant_min - zp_z_pre) * scale_z_pre;
+    float x_max_z = static_cast<float>(quant_max - zp_z_pre) * scale_z_pre;
+
+    float scale_r_pre = calculate_scale(exp2_inv_r_pre);
+    float x_min_r = static_cast<float>(quant_min - zp_r_pre) * scale_r_pre;
+    float x_max_r = static_cast<float>(quant_max - zp_r_pre) * scale_r_pre;
+
+    float scale_g_pre = calculate_scale(exp2_inv_g_pre);
+    float x_min_g = static_cast<float>(quant_min - zp_g_pre) * scale_g_pre;
+    float x_max_g = static_cast<float>(quant_max - zp_g_pre) * scale_g_pre;
+
+    // 根据 QuantT 类型选择相应的初始化函数
+    if constexpr (std::is_same_v<QuantT, int8_t>) {
+        // INT8 版本
+        init_sigmoid_z_lut_int8(exp2_inv_z_pre, zp_z_pre, exp2_inv_z_out, zp_z_out, x_min_z,
                                 x_max_z);
-    }
 
-    // ========== R 门 LUT 初始化（sigmoid，输出 uint）==========
-    if (r_use_16bit) {
-        init_sigmoid_r_lut_int16(shift_bits_r_pre, params.zp_r_pre_,
-                                 shift_bits_r_out, params.zp_r_out_, x_min_r,
-                                 x_max_r);
-    } else {
-        init_sigmoid_r_lut_int8(shift_bits_r_pre, params.zp_r_pre_,
-                                shift_bits_r_out, params.zp_r_out_, x_min_r,
+        init_sigmoid_r_lut_int8(exp2_inv_r_pre, zp_r_pre, exp2_inv_r_out, zp_r_out, x_min_r,
                                 x_max_r);
-    }
 
-    // ========== G 门 LUT 初始化（tanh，输出 int）==========
-    if (g_use_16bit) {
-        init_tanh_lut_int16(shift_bits_g_pre, params.zp_g_pre_, shift_bits_g_out, params.zp_g_out_,
-                            x_min_g, x_max_g);
+        init_tanh_lut_int8(exp2_inv_g_pre, zp_g_pre, exp2_inv_g_out, zp_g_out, x_min_g, x_max_g);
+    } else if constexpr (std::is_same_v<QuantT, int16_t>) {
+        // INT16 版本
+        init_sigmoid_z_lut_int16(exp2_inv_z_pre, zp_z_pre, exp2_inv_z_out, zp_z_out, x_min_z,
+                                 x_max_z);
+
+        init_sigmoid_r_lut_int16(exp2_inv_r_pre, zp_r_pre, exp2_inv_r_out, zp_r_out, x_min_r,
+                                 x_max_r);
+
+        init_tanh_lut_int16(exp2_inv_g_pre, zp_g_pre, exp2_inv_g_out, zp_g_out, x_min_g, x_max_g);
     } else {
         init_tanh_lut_int8(shift_bits_g_pre, params.zp_g_pre_, shift_bits_g_out, params.zp_g_out_,
                            x_min_g, x_max_g);
@@ -336,8 +241,8 @@ template <typename T>
 __global__ void computeWeightSumMulZP(
     const T *__restrict__ W_q,         // [out_dim, in_dim] 权重量化矩阵, 列主序储存
     int32_t *__restrict__ weight_sum,  // [out_dim] 输出数组
-    int32_t x_zp,
-    const int32_t *__restrict__ n,  // n为: scale_W * scale_x / scale_Wx ≈ 2^-n.
+    int x_zp,
+    const int8_t *__restrict__ n,  // n为: scale_W * scale_x / scale_Wx ≈ 2^-n.
     // per-channel
     int out_dim,  // 输出通道数 (M)
     int in_dim    // 输入通道数 (K)
@@ -358,7 +263,7 @@ __global__ void computeWeightSumMulZP(
 }
 
 template <typename T, typename QuantT>
-__global__ void quantification(const T *data, QuantT *quant_data, size_t size, int32_t exp2_inv,
+__global__ void quantification(const T *data, QuantT *quant_data, size_t size, int8_t exp2_inv,
                                int32_t zp) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= size) {
@@ -369,7 +274,7 @@ __global__ void quantification(const T *data, QuantT *quant_data, size_t size, i
 }
 
 template <typename T, typename QuantT>
-__global__ void dequantification(const QuantT *quant_data, T *data, size_t size, int32_t exp2_inv,
+__global__ void dequantification(const QuantT *quant_data, T *data, size_t size, int8_t exp2_inv,
                                  int32_t zp) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= size) {
@@ -383,11 +288,16 @@ __global__ void dequantification(const QuantT *quant_data, T *data, size_t size,
 
 namespace kernel {
 
-template <typename T, typename QuantT>
-__global__ void quantificationV(const T *data, QuantT *quant_data, int time_steps, int batch_size,
-                                int hidden_size, int32_t exp2_inv_z, int32_t zp_z,
-                                int32_t exp2_inv_r, int32_t zp_r, int32_t exp2_inv_g, int32_t zp_g,
-                                int32_t exp2_inv_Rh_add_br, int32_t zp_Rh_add_br) {
+// v 使用 int32_t 存储，但内部各部分使用不同的量化参数:
+// - z: 使用 exp2_inv_z, zp_z
+// - r: 使用 exp2_inv_r, zp_r
+// - g: 使用 exp2_inv_g, zp_g
+// - Rh_add_br_g: 使用 exp2_inv_Rh_add_br, zp_Rh_add_br
+template <typename T>
+__global__ void dequantificationV(const int32_t *quant_data, T *data, int time_steps, int batch_size,
+                                  int hidden_size, int8_t exp2_inv_z, int32_t zp_z,
+                                  int8_t exp2_inv_r, int32_t zp_r, int8_t exp2_inv_g, int32_t zp_g,
+                                  int8_t exp2_inv_Rh_add_br, int32_t zp_Rh_add_br) {
     // 计算当前线程处理的索引
     // blockIdx.x: time_step
     // blockIdx.y: batch
@@ -407,74 +317,33 @@ __global__ void quantificationV(const T *data, QuantT *quant_data, int time_step
 
     const int base_idx = t * (batch_size * hidden_size * 4) + b * (hidden_size * 4);
 
-    // 量化 z_out (第0部分)
+    // 反量化 z_out (第0部分) - 从 int32_t 反量化
     const int z_idx = base_idx + 0 * hidden_size + h;
-    quant_data[z_idx] = dev::quantize<QuantT>(data[z_idx], exp2_inv_z, zp_z);
+    data[z_idx] = dequantize<int32_t>(quant_data[z_idx], exp2_inv_z, zp_z);
 
-    // 量化 r_out (第1部分)
+    // 反量化 r_out (第1部分) - 从 int32_t 反量化
     const int r_idx = base_idx + 1 * hidden_size + h;
-    quant_data[r_idx] = dev::quantize<QuantT>(data[r_idx], exp2_inv_r, zp_r);
+    data[r_idx] = dequantize<int32_t>(quant_data[r_idx], exp2_inv_r, zp_r);
 
-    // 量化 g_out (第2部分，对称量化，zp=0)
+    // 反量化 g_out (第2部分) - 从 int32_t 反量化
     const int g_idx = base_idx + 2 * hidden_size + h;
-    quant_data[g_idx] = dev::quantize<QuantT>(data[g_idx], exp2_inv_g, zp_g);
+    data[g_idx] = dequantize<int32_t>(quant_data[g_idx], exp2_inv_g, zp_g);
 
-    // 量化 Rh_add_br_g (第3部分)
+    // 反量化 Rh_add_br_g (第3部分) - 从 int32_t 反量化
     const int rh_idx = base_idx + 3 * hidden_size + h;
-    quant_data[rh_idx] = dev::quantize<QuantT>(data[rh_idx], exp2_inv_Rh_add_br, zp_Rh_add_br);
-}
-
-template <typename T, typename QuantT>
-__global__ void dequantificationV(const QuantT *quant_data, T *data, int time_steps, int batch_size,
-                                  int hidden_size, int32_t exp2_inv_z, int32_t zp_z,
-                                  int32_t exp2_inv_r, int32_t zp_r, int32_t exp2_inv_g,
-                                  int32_t zp_g, int32_t exp2_inv_Rh_add_br, int32_t zp_Rh_add_br) {
-    // 计算当前线程处理的索引
-    // blockIdx.x: time_step
-    // blockIdx.y: batch
-    // threadIdx.x: hidden_unit
-    const int t = blockIdx.x;
-    const int b = blockIdx.y;
-    const int h = threadIdx.x;
-
-    if (t >= time_steps || b >= batch_size || h >= hidden_size) {
-        return;
-    }
-
-    // v的布局: [time_steps, batch_size, hidden_size * 4]
-    // 每个时间步内: [batch_size, hidden_size * 4]
-    // 每个batch内: [hidden_size * 4]
-    // 4个部分: [z_out, r_out, g_out, Rh_add_br_g]，每个部分大小为 hidden_size
-
-    const int base_idx = t * (batch_size * hidden_size * 4) + b * (hidden_size * 4);
-
-    // 反量化 z_out (第0部分)
-    const int z_idx = base_idx + 0 * hidden_size + h;
-    data[z_idx] = dequantize<QuantT>(quant_data[z_idx], exp2_inv_z, zp_z);
-
-    // 反量化 r_out (第1部分)
-    const int r_idx = base_idx + 1 * hidden_size + h;
-    data[r_idx] = dequantize<QuantT>(quant_data[r_idx], exp2_inv_r, zp_r);
-
-    // 反量化 g_out (第2部分，对称量化，zp=0)
-    const int g_idx = base_idx + 2 * hidden_size + h;
-    data[g_idx] = dequantize<QuantT>(quant_data[g_idx], exp2_inv_g, zp_g);
-
-    // 反量化 Rh_add_br_g (第3部分)
-    const int rh_idx = base_idx + 3 * hidden_size + h;
-    data[rh_idx] = dequantize<QuantT>(quant_data[rh_idx], exp2_inv_Rh_add_br, zp_Rh_add_br);
+    data[rh_idx] = dequantize<int32_t>(quant_data[rh_idx], exp2_inv_Rh_add_br, zp_Rh_add_br);
 }
 
 template <typename T, typename QuantT>
 __global__ void quantificationPerChannel(const T *src, QuantT *quant_data, size_t input_size,
-                                         size_t channel_size, const int32_t *exp2_invs) {
+                                         size_t channel_size, const int8_t *exp2_invs) {
     const size_t channel_idx = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t input_idx = blockIdx.y * blockDim.y + threadIdx.y;
     if (channel_idx >= channel_size || input_idx >= input_size) {
         return;
     }
 
-    const int32_t exp2_inv = exp2_invs[channel_idx];
+    const int8_t exp2_inv = exp2_invs[channel_idx];
 
     const size_t idx = input_idx * channel_size + channel_idx;
     quant_data[idx] = dev::quantize<QuantT>(src[idx], exp2_inv, 0);
@@ -482,14 +351,14 @@ __global__ void quantificationPerChannel(const T *src, QuantT *quant_data, size_
 
 template <typename T, typename QuantT>
 __global__ void dequantificationPerChannel(const QuantT *quant_data, T *data, size_t input_size,
-                                           size_t channel_size, const int32_t *exp2_invs) {
+                                           size_t channel_size, const int8_t *exp2_invs) {
     const size_t channel_idx = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t input_idx = blockIdx.y * blockDim.y + threadIdx.y;
     if (channel_idx >= channel_size || input_idx >= input_size) {
         return;
     }
 
-    const int32_t exp2_inv = exp2_invs[channel_idx];
+    const int8_t exp2_inv = exp2_invs[channel_idx];
 
     const size_t idx = input_idx * channel_size + channel_idx;
     data[idx] = dequantize<QuantT>(quant_data[idx], exp2_inv, 0);
@@ -502,7 +371,7 @@ void computeWeightSumMulzp(
     const T *W_q,         // [out_dim, in_dim] 权重量化矩阵
     int32_t *weight_sum,  // [out_dim] 输出数组
     int x_zp,
-    const int32_t *__restrict__ n,  // n为: scale_W * scale_x / scale_Wx ≈ 2^-n.
+    const int8_t *__restrict__ n,  // n为: scale_W * scale_x / scale_Wx ≈ 2^-n.
     // per-channel
     int out_dim,  // 输出通道数 (M)
     int in_dim,   // 输入通道数 (K)
@@ -517,7 +386,7 @@ template void computeWeightSumMulzp<int8_t>(
     const int8_t *W_q,    // [out_dim, in_dim] 权重量化矩阵
     int32_t *weight_sum,  // [out_dim] 输出数组
     int x_zp,
-    const int32_t *__restrict__ n,  // n为: scale_W * scale_x / scale_Wx ≈ 2^-n.
+    const int8_t *__restrict__ n,  // n为: scale_W * scale_x / scale_Wx ≈ 2^-n.
     // per-channel
     int out_dim,  // 输出通道数 (M)
     int in_dim,   // 输入通道数 (K)
@@ -527,7 +396,7 @@ template void computeWeightSumMulzp<int16_t>(
     const int16_t *W_q,   // [out_dim, in_dim] 权重量化矩阵
     int32_t *weight_sum,  // [out_dim] 输出数组
     int x_zp,
-    const int32_t *__restrict__ n,  // n为: scale_W * scale_x / scale_Wx ≈ 2^-n.
+    const int8_t *__restrict__ n,  // n为: scale_W * scale_x / scale_Wx ≈ 2^-n.
     // per-channel
     int out_dim,  // 输出通道数 (M)
     int in_dim,   // 输入通道数 (K)
@@ -536,7 +405,7 @@ template void computeWeightSumMulzp<int16_t>(
 namespace dev {
 
 template <typename T, typename QuantT>
-void quantification(const T *data, QuantT *quant_data, size_t size, int32_t exp2_inv, int32_t zp) {
+void quantification(const T *data, QuantT *quant_data, size_t size, int8_t exp2_inv, int32_t zp) {
     size_t block = 256;
     size_t grid = (size + block - 1) / block;
     kernel::quantification<<<grid, block>>>(data, quant_data, size, exp2_inv, zp);
@@ -545,19 +414,17 @@ void quantification(const T *data, QuantT *quant_data, size_t size, int32_t exp2
         printf("Kernel launch failed: %s\n", cudaGetErrorString(err));
     }
     cudaDeviceSynchronize();
-    cudaDeviceSynchronize();
 }
 
 template void quantification<float, int8_t>(const float *data, int8_t *quant_data, size_t size,
-                                            int32_t exp2_inv, int32_t zp);
+                                            int8_t exp2_inv, int32_t zp);
 template void quantification<float, int16_t>(const float *data, int16_t *quant_data, size_t size,
-                                             int32_t exp2_inv, int32_t zp);
+                                             int8_t exp2_inv, int32_t zp);
 template void quantification<float, int32_t>(const float *data, int32_t *quant_data, size_t size,
-                                             int32_t exp2_inv, int32_t zp);
+                                             int8_t exp2_inv, int32_t zp);
 
 template <typename T, typename QuantT>
-void dequantification(const QuantT *quant_data, T *data, size_t size, int32_t exp2_inv,
-                      int32_t zp) {
+void dequantification(const QuantT *quant_data, T *data, size_t size, int8_t exp2_inv, int32_t zp) {
     size_t block = 256;
     size_t grid = (size + block - 1) / block;
     kernel::dequantification<<<grid, block>>>(quant_data, data, size, exp2_inv, zp);
@@ -565,50 +432,17 @@ void dequantification(const QuantT *quant_data, T *data, size_t size, int32_t ex
 }
 
 template void dequantification<float, int8_t>(const int8_t *quant_data, float *data, size_t size,
-                                              int32_t exp2_inv, int32_t zp);
+                                              int8_t exp2_inv, int32_t zp);
 template void dequantification<float, int16_t>(const int16_t *quant_data, float *data, size_t size,
-                                               int32_t exp2_inv, int32_t zp);
+                                               int8_t exp2_inv, int32_t zp);
 template void dequantification<float, int32_t>(const int32_t *quant_data, float *data, size_t size,
-                                               int32_t exp2_inv, int32_t zp);
+                                               int8_t exp2_inv, int32_t zp);
 
-template <typename T, typename QuantT>
-void quantificationV(const T *data, QuantT *quant_data, int time_steps, int batch_size,
-                     int hidden_size, int32_t exp2_inv_z, int32_t zp_z, int32_t exp2_inv_r,
-                     int32_t zp_r, int32_t exp2_inv_g, int32_t zp_g, int32_t exp2_inv_Rh_add_br,
-                     int32_t zp_Rh_add_br) {
-    // Launch configuration: 每个block处理一个时间步和一个batch的所有hidden单元
-    // blockDim.x = hidden_size (每个线程处理一个hidden单元)
-    // gridDim.x = time_steps
-    // gridDim.y = batch_size
-    const dim3 blockDim(hidden_size);
-    const dim3 gridDim(time_steps, batch_size);
-
-    kernel::quantificationV<<<gridDim, blockDim>>>(
-        data, quant_data, time_steps, batch_size, hidden_size, exp2_inv_z, zp_z, exp2_inv_r, zp_r,
-        exp2_inv_g, zp_g, exp2_inv_Rh_add_br, zp_Rh_add_br);
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("quantificationV kernel launch failed: %s\n", cudaGetErrorString(err));
-    }
-    cudaDeviceSynchronize();
-}
-
-template void quantificationV<float, int8_t>(const float *data, int8_t *quant_data, int time_steps,
-                                             int batch_size, int hidden_size, int32_t exp2_inv_z,
-                                             int32_t zp_z, int32_t exp2_inv_r, int32_t zp_r,
-                                             int32_t exp2_inv_g, int32_t zp_g,
-                                             int32_t exp2_inv_Rh_add_br, int32_t zp_Rh_add_br);
-template void quantificationV<float, int16_t>(const float *data, int16_t *quant_data,
-                                              int time_steps, int batch_size, int hidden_size,
-                                              int32_t exp2_inv_z, int32_t zp_z, int32_t exp2_inv_r,
-                                              int32_t zp_r, int32_t exp2_inv_g, int32_t zp_g,
-                                              int32_t exp2_inv_Rh_add_br, int32_t zp_Rh_add_br);
-
-template <typename T, typename QuantT>
-void dequantificationV(const QuantT *quant_data, T *data, int time_steps, int batch_size,
-                       int hidden_size, int32_t exp2_inv_z, int32_t zp_z, int32_t exp2_inv_r,
-                       int32_t zp_r, int32_t exp2_inv_g, int32_t zp_g, int32_t exp2_inv_Rh_add_br,
+// v 统一使用 int32_t 存储
+template <typename T>
+void dequantificationV(const int32_t *quant_data, T *data, int time_steps, int batch_size,
+                       int hidden_size, int8_t exp2_inv_z, int32_t zp_z, int8_t exp2_inv_r,
+                       int32_t zp_r, int8_t exp2_inv_g, int32_t zp_g, int8_t exp2_inv_Rh_add_br,
                        int32_t zp_Rh_add_br) {
     // Launch configuration: 每个block处理一个时间步和一个batch的所有hidden单元
     // blockDim.x = hidden_size (每个线程处理一个hidden单元)
@@ -628,21 +462,15 @@ void dequantificationV(const QuantT *quant_data, T *data, int time_steps, int ba
     cudaDeviceSynchronize();
 }
 
-template void dequantificationV<float, int8_t>(const int8_t *quant_data, float *data,
-                                               int time_steps, int batch_size, int hidden_size,
-                                               int32_t exp2_inv_z, int32_t zp_z, int32_t exp2_inv_r,
-                                               int32_t zp_r, int32_t exp2_inv_g, int32_t zp_g,
-                                               int32_t exp2_inv_Rh_add_br, int32_t zp_Rh_add_br);
-template void dequantificationV<float, int16_t>(const int16_t *quant_data, float *data,
-                                                int time_steps, int batch_size, int hidden_size,
-                                                int32_t exp2_inv_z, int32_t zp_z,
-                                                int32_t exp2_inv_r, int32_t zp_r,
-                                                int32_t exp2_inv_g, int32_t zp_g,
-                                                int32_t exp2_inv_Rh_add_br, int32_t zp_Rh_add_br);
+template void dequantificationV<float>(const int32_t *quant_data, float *data,
+                                       int time_steps, int batch_size, int hidden_size,
+                                       int8_t exp2_inv_z, int32_t zp_z, int8_t exp2_inv_r,
+                                       int32_t zp_r, int8_t exp2_inv_g, int32_t zp_g,
+                                       int8_t exp2_inv_Rh_add_br, int32_t zp_Rh_add_br);
 
 template <typename T, typename QuantT>
 void quantificationPerChannel(const T *src, QuantT *quant_data, size_t input_size,
-                              size_t channel_size, const dev::vector<int32_t> &exp2_invs) {
+                              size_t channel_size, const dev::vector<int8_t> &exp2_invs) {
     const dim3 blockDim(32, 16);
     const dim3 gridDim((channel_size + blockDim.x - 1) / blockDim.x,
                        (input_size + blockDim.y - 1) / blockDim.y);
@@ -654,18 +482,18 @@ void quantificationPerChannel(const T *src, QuantT *quant_data, size_t input_siz
 
 template void quantificationPerChannel<float, int8_t>(const float *src, int8_t *quant_data,
                                                       size_t input_size, size_t channel_size,
-                                                      const dev::vector<int32_t> &exp2_invs);
+                                                      const dev::vector<int8_t> &exp2_invs);
 
 template void quantificationPerChannel<float, int16_t>(const float *src, int16_t *quant_data,
                                                        size_t input_size, size_t channel_size,
-                                                       const dev::vector<int32_t> &exp2_invs);
+                                                       const dev::vector<int8_t> &exp2_invs);
 template void quantificationPerChannel<float, int32_t>(const float *src, int32_t *quant_data,
                                                        size_t input_size, size_t channel_size,
-                                                       const dev::vector<int32_t> &exp2_invs);
+                                                       const dev::vector<int8_t> &exp2_invs);
 
 template <typename T, typename QuantT>
 void dequantificationPerChannel(const QuantT *quant_data, T *data, size_t input_size,
-                                size_t channel_size, const dev::vector<int32_t> &exp2_invs) {
+                                size_t channel_size, const dev::vector<int8_t> &exp2_invs) {
     const dim3 blockDim(32, 16);
     const dim3 gridDim((channel_size + blockDim.x - 1) / blockDim.x,
                        (input_size + blockDim.y - 1) / blockDim.y);
@@ -677,13 +505,13 @@ void dequantificationPerChannel(const QuantT *quant_data, T *data, size_t input_
 
 template void dequantificationPerChannel<float, int8_t>(const int8_t *quant_data, float *data,
                                                         size_t input_size, size_t channel_size,
-                                                        const dev::vector<int32_t> &exp2_invs);
+                                                        const dev::vector<int8_t> &exp2_invs);
 template void dequantificationPerChannel<float, int16_t>(const int16_t *quant_data, float *data,
                                                          size_t input_size, size_t channel_size,
-                                                         const dev::vector<int32_t> &exp2_invs);
+                                                         const dev::vector<int8_t> &exp2_invs);
 template void dequantificationPerChannel<float, int32_t>(const int32_t *quant_data, float *data,
                                                          size_t input_size, size_t channel_size,
-                                                         const dev::vector<int32_t> &exp2_invs);
+                                                         const dev::vector<int8_t> &exp2_invs);
 }  // namespace dev
 
 // ==================== 分段线性量化参数生成函数 ====================
@@ -712,90 +540,128 @@ inline void linear_fit(const std::vector<float> &x, const std::vector<float> &y,
     c = (sum_y - b * sum_x) / n;
 }
 
-// 辅助函数：计算 shift_bits 并进行边界调整（与 Python 实现一致）
-// 返回 (shift_bits, adjusted_max, zero_point)
-inline std::tuple<int8_t, float, int32_t> calculate_shift_bits_and_adjust_range(float f_min,
-                                                                                float f_max,
-                                                                                int32_t quant_max) {
-    // 步骤1: 计算原始 scale
-    float s_original_scale = (f_max - f_min) / static_cast<float>(quant_max);
-
-    // 步骤2: 转换为2的幂次方 scale = 1 / 2^n
-    // 使用 round() 而不是 ceil()，与 Python 实现一致
-    int8_t shift_bits = 0;
-    if (s_original_scale > 0) {
-        float n_shift = -std::log2(s_original_scale);
-        shift_bits = static_cast<int8_t>(std::round(n_shift));
-        shift_bits = std::max(static_cast<int8_t>(0), shift_bits);
-    }
-
-    // 步骤3: 计算 scale 和 zero_point
-    float scale = std::pow(2.0f, -static_cast<float>(shift_bits));
-    int32_t zero_point = static_cast<int32_t>(std::round(-f_min / scale));
-
-    // 步骤4: 验证边界并调整 f_max（与 Python 实现一致）
-    int32_t q_max_from_f_max = static_cast<int32_t>(std::round(f_max / scale)) + zero_point;
-    float adjusted_f_max = f_max;
-    if (q_max_from_f_max > quant_max) {
-        // 调整 f_max，使得 q_max = Q_max，保持 zero_point 不变
-        adjusted_f_max = (quant_max - zero_point) * scale;
-    }
-
-    return std::make_tuple(shift_bits, adjusted_f_max, zero_point);
-}
-
-// 自适应分段（Sigmoid 专用）
+// 自适应分段（Sigmoid/Tanh 专用）
+// 🔥 基于导数的权重分配，与 Python 参考 (bc_ds_U8.py) 保持一致
+// 关键：中心区域固定在 x = 0 附近（sigmoid/tanh 的特性），不是输入范围的中心
 std::vector<float> adaptive_segmentation_sigmoid(float x_min, float x_max, int num_segments) {
-    std::vector<float> segment_points(num_segments + 1);
-    segment_points[0] = x_min;
-    segment_points[num_segments] = x_max;
-
-    // 在中心区域（x ≈ 0）密集分段
-    float center_range = 2.0f;       // 中心区域范围 [-2, 2]
-    int n_dense = num_segments / 2;  // 一半段用于中心区域
-    int n_sparse = num_segments - n_dense;
-
-    // 稀疏分段（远离中心）
-    if (x_min < -center_range) {
-        float sparse_range = -center_range - x_min;
-        for (int i = 1; i <= n_sparse; i++) {
-            float ratio = static_cast<float>(i) / (n_sparse + 1);
-            segment_points[i] = x_min + sparse_range * ratio;
+    // Sigmoid/Tanh 的权重配置（与 Python 参考一致）
+    // centerWeight: 中心区域的权重倍数
+    // centerRange: 中心区域的半宽度
+    const float centerWeight = 5.0f;  // sigmoid: 5.0, tanh: 4.0
+    const float centerRange = 2.0f;   // |x| < 2.0 的区域权重增加
+    
+    // 1. 在输入范围内均匀采样，计算权重
+    const int numSamples = 1000;
+    std::vector<float> xSamples(numSamples);
+    std::vector<float> weights(numSamples - 1);
+    
+    for (int i = 0; i < numSamples; i++) {
+        xSamples[i] = x_min + (x_max - x_min) * static_cast<float>(i) / (numSamples - 1);
+    }
+    
+    // 2. 计算导数（斜率）和权重
+    for (int i = 0; i < numSamples - 1; i++) {
+        float x = xSamples[i];
+        float x_next = xSamples[i + 1];
+        
+        // 计算 sigmoid 的导数 y' = y * (1 - y)，其中 y = sigmoid(x)
+        float y = 1.0f / (1.0f + std::exp(-x));
+        float y_next = 1.0f / (1.0f + std::exp(-x_next));
+        float slope = std::abs(y_next - y) / (x_next - x + 1e-9f);
+        
+        // 距离 x = 0 的距离（与 Python 参考一致）
+        float distToCenter = std::abs(x);
+        
+        // 计算权重
+        if (distToCenter < centerRange) {
+            // 中心区域：权重随距离线性递减
+            weights[i] = centerWeight * (1.0f - distToCenter / centerRange) + 1.0f;
+        } else {
+            // 外侧区域：基于斜率的权重
+            weights[i] = 1.0f + slope * 0.5f;
         }
     }
-
-    // 密集分段（中心区域）
-    float dense_start = std::max(x_min, -center_range);
-    float dense_end = std::min(x_max, center_range);
-    float dense_range = dense_end - dense_start;
-    for (int i = 0; i < n_dense; i++) {
-        float ratio = static_cast<float>(i + 1) / (n_dense + 1);
-        segment_points[n_sparse + i] = dense_start + dense_range * ratio;
+    
+    // 3. 归一化权重
+    float sumWeights = 0.0f;
+    for (int i = 0; i < numSamples - 1; i++) {
+        sumWeights += weights[i];
     }
-
-    // 稀疏分段（远离中心，右侧）
-    if (x_max > center_range) {
-        float sparse_range = x_max - center_range;
-        for (int i = 0; i < n_sparse; i++) {
-            float ratio = static_cast<float>(i + 1) / (n_sparse + 1);
-            segment_points[n_sparse + n_dense + i] = center_range + sparse_range * ratio;
+    for (int i = 0; i < numSamples - 1; i++) {
+        weights[i] /= sumWeights;
+    }
+    
+    // 4. 计算累积权重
+    std::vector<float> cumWeights(numSamples - 1);
+    cumWeights[0] = weights[0];
+    for (int i = 1; i < numSamples - 1; i++) {
+        cumWeights[i] = cumWeights[i - 1] + weights[i];
+    }
+    
+    // 5. 根据累积权重生成分段点
+    std::vector<float> points;
+    points.push_back(x_min);
+    
+    for (int i = 1; i < num_segments; i++) {
+        float target = static_cast<float>(i) / num_segments;
+        
+        // 二分查找目标累积权重对应的 x 值
+        auto it = std::lower_bound(cumWeights.begin(), cumWeights.end(), target);
+        int idx = static_cast<int>(std::distance(cumWeights.begin(), it));
+        if (idx >= numSamples - 1) idx = numSamples - 2;
+        if (idx < 0) idx = 0;
+        
+        points.push_back(xSamples[idx]);
+    }
+    
+    points.push_back(x_max);
+    
+    // 6. 确保点单调递增且无重复
+    std::sort(points.begin(), points.end());
+    auto last = std::unique(points.begin(), points.end(),
+                            [](float a, float b) { return std::abs(a - b) < 1e-9f; });
+    points.erase(last, points.end());
+    
+    // 如果去重后点数不够，在最大间隔处插入点
+    while (static_cast<int>(points.size()) < num_segments + 1) {
+        float max_gap = 0.0f;
+        size_t max_gap_idx = 0;
+        for (size_t i = 0; i < points.size() - 1; i++) {
+            float gap = points[i + 1] - points[i];
+            if (gap > max_gap) {
+                max_gap = gap;
+                max_gap_idx = i;
+            }
         }
+        float new_point = (points[max_gap_idx] + points[max_gap_idx + 1]) / 2.0f;
+        points.insert(points.begin() + max_gap_idx + 1, new_point);
     }
-
-    // 排序确保单调递增
-    std::sort(segment_points.begin(), segment_points.end());
-
-    return segment_points;
+    
+    return points;
 }
 
-// 生成 Sigmoid 分段线性拟合 LUT（主机端）
-SigmoidLUT_INT16 generate_sigmoid_lut_int16(int8_t shift_bits_x,  // 输入 shift_bits
-                                            int32_t zp_x,         // 输入 zero-point
-                                            int8_t shift_bits_y,  // 输出 shift_bits
-                                            int32_t zp_y,         // 输出 zero-point
-                                            float x_min,          // 输入范围最小值
-                                            float x_max           // 输入范围最大值
-) {
+// ==================== INT16 版本的分段线性量化参数生成函数 ====================
+//
+// 【生成流程】三遍扫描（与 INT8 版本相同，仅位宽不同）
+//   Pass 1: 线性拟合每段 → 浮点系数 (b_fp, c_fp)
+//   Pass 2: 统计最大值 → 全局量化参数 (shift_bits_b, shift_bits_c)
+//   Pass 3: 量化系数 → (q_b, term_c_precomputed, n_BX_total)
+//
+// 【最终公式】q_y = (q_b * (q_x - zp_x)) >> n_BX_total + term_c_precomputed
+//
+// 【与 INT8 的区别】
+//   - q_b: int16_t（范围 [-32768, 32767]）
+//   - term_c_precomputed: int32_t（INT8 版本为 int16_t）
+//   - threshold: int16_t
+//
+// =========================================================================
+
+/**
+ * @brief 生成 Sigmoid 分段线性拟合 LUT（INT16 版本）
+ */
+SigmoidLUT_INT16 generate_sigmoid_lut_int16(int8_t shift_bits_x, int32_t zp_x,
+                                            int8_t shift_bits_y, int32_t zp_y,
+                                            float x_min, float x_max) {
     SigmoidLUT_INT16 lut;
     lut.shift_bits_x = shift_bits_x;
     lut.zp_x = zp_x;
@@ -805,7 +671,13 @@ SigmoidLUT_INT16 generate_sigmoid_lut_int16(int8_t shift_bits_x,  // 输入 shif
     // 1. 生成分段点（自适应分段）
     std::vector<float> segment_points = adaptive_segmentation_sigmoid(x_min, x_max, NUM_SEGMENTS);
 
-    // 2. 对每段进行线性拟合
+    // ===== 第一遍扫描：拟合所有分段，收集所有系数 =====
+    struct SegmentCoeffs {
+        float x_start, x_end;
+        float b, c;
+    };
+    std::vector<SegmentCoeffs> all_coeffs(NUM_SEGMENTS);
+
     for (int i = 0; i < NUM_SEGMENTS; i++) {
         float x_start = segment_points[i];
         float x_end = segment_points[i + 1];
@@ -825,58 +697,48 @@ SigmoidLUT_INT16 generate_sigmoid_lut_int16(int8_t shift_bits_x,  // 输入 shif
         float b_fp, c_fp;
         linear_fit(x_seg, y_seg, b_fp, c_fp);
 
-        // 3. 量化系数 b（对称量化，zero-point=0）
-        int8_t shift_bits_b = determine_shift_bits_int16(std::abs(b_fp));
-        int16_t q_b = quantize_coefficient_int16(b_fp, shift_bits_b);
+        all_coeffs[i] = {x_start, x_end, b_fp, c_fp};
+    }
 
-        // 4. 量化系数 c（需要烘焙 zero-point）
-        // c_adjusted = c + zp_y * scale_y
-        float scale_y = std::pow(2.0f, -static_cast<float>(shift_bits_y));
-        float c_adjusted = c_fp + static_cast<float>(zp_y) * scale_y;
+    // ===== 第二遍扫描：统一量化系数 =====
+    // 计算输出 zero-point 偏移，烘焙到 c 中
+    float scale_y = std::pow(2.0f, -static_cast<float>(shift_bits_y));
+    float zp_y_offset = static_cast<float>(zp_y) * scale_y;
 
-        int8_t shift_bits_c = determine_shift_bits_int16(std::abs(c_adjusted));
+    // 收集所有 b 和调整后的 c
+    float b_abs_max = 0.0f;
+    float c_abs_max = 0.0f;
+    for (int i = 0; i < NUM_SEGMENTS; i++) {
+        b_abs_max = std::max(b_abs_max, std::abs(all_coeffs[i].b));
+        float c_adjusted = all_coeffs[i].c + zp_y_offset;
+        c_abs_max = std::max(c_abs_max, std::abs(c_adjusted));
+    }
+
+    // 为所有段创建统一的量化参数
+    if (b_abs_max < 1e-9f) b_abs_max = 1e-9f;
+    if (c_abs_max < 1e-9f) c_abs_max = 1e-9f;
+
+    int8_t shift_bits_b = determine_shift_bits_int16(b_abs_max);
+    int8_t shift_bits_c = determine_shift_bits_int16(c_abs_max);
+
+    // ===== 第三遍扫描：量化每段并计算移位 =====
+    for (int i = 0; i < NUM_SEGMENTS; i++) {
+        const auto& coeff = all_coeffs[i];
+        float c_adjusted = coeff.c + zp_y_offset;
+
+        // 使用统一的量化器量化系数
+        int16_t q_b = quantize_coefficient_int16(coeff.b, shift_bits_b);
         int16_t q_c = quantize_coefficient_int16(c_adjusted, shift_bits_c);
 
-        // 5. 计算 shift_bits_bx（根据 bx 的实际范围）
-        // bx = b * x，需要计算该段内 bx 的范围
-        float scale_x = std::pow(2.0f, -static_cast<float>(shift_bits_x));
+        // 计算融合移位位数
+        // n_BX_total = shift_bits_b + shift_bits_x - shift_bits_y
+        // （简化：省略中间 bx 量化步骤，直接融合）
+        int8_t n_BX_total = shift_bits_b + shift_bits_x - shift_bits_y;
 
-        // 计算该段内 x_offset 的范围（去零点后的范围）
-        // x_offset = q_x - zp_x，对应的浮点范围是 x_start 到 x_end
-        // 但实际计算时，x_offset 的范围需要考虑量化后的值
-        // 简化：直接使用浮点范围计算 bx 的范围
-        float bx_at_start = b_fp * x_start;
-        float bx_at_end = b_fp * x_end;
-        float bx_min = std::min(bx_at_start, bx_at_end);
-        float bx_max = std::max(bx_at_start, bx_at_end);
-
-        // 根据 bx 的范围确定 shift_bits_bx
-        // 使用对称量化（因为 bx 可能跨越0）
-        float bx_abs_max = std::max(std::abs(bx_min), std::abs(bx_max));
-        if (bx_abs_max < 1e-9f) {
-            bx_abs_max = 1e-9f;  // 避免除零
-        }
-
-        // 计算 shift_bits_bx：使 scale_bx = 2^(-shift_bits_bx) 能够覆盖 bx 的范围
-        // 🔥 修正：根据 Python 参考（u16.py），bx 使用非对称量化（无符号），范围 [0, 65535]
-        // 使用与 Python 一致的 round() 方法，并添加边界调整机制
-        const int32_t max_uint16 = 65535;
-        if (bx_max - bx_min < 1e-9f) {
-            bx_max = bx_min + 1e-9f;  // 避免除零
-        }
-        auto [shift_bits_bx, adjusted_bx_max, zp_bx] =
-            calculate_shift_bits_and_adjust_range(bx_min, bx_max, max_uint16);
-        // 注意：adjusted_bx_max 和 zp_bx 目前不直接使用，但保持与 Python 实现一致
-
-        // 6. 计算移位位数（根据文档公式）
-        int8_t n_bx = shift_bits_b + shift_bits_x - shift_bits_bx;
-        int8_t n_yb = shift_bits_bx - shift_bits_y;
+        // 计算 n_yc
         int8_t n_yc = shift_bits_c - shift_bits_y;
 
-        // 融合移位
-        int8_t n_BX_total = n_bx + n_yb;
-
-        // 7. 预计算 term_c
+        // 预计算 term_c
         int32_t term_c_precomputed;
         if (n_yc >= 0) {
             term_c_precomputed = static_cast<int32_t>(q_c) >> n_yc;
@@ -884,8 +746,8 @@ SigmoidLUT_INT16 generate_sigmoid_lut_int16(int8_t shift_bits_x,  // 输入 shif
             term_c_precomputed = static_cast<int32_t>(q_c) << (-n_yc);
         }
 
-        // 8. 量化阈值
-        uint16_t threshold = quantize_input_uint16(x_end, shift_bits_x, zp_x);
+        // 量化阈值（使用有符号量化 INT16）
+        int16_t threshold = quantize_input_int16(coeff.x_end, shift_bits_x, zp_x);
 
         // 保存段参数
         lut.segments[i].q_b = q_b;
@@ -897,18 +759,27 @@ SigmoidLUT_INT16 generate_sigmoid_lut_int16(int8_t shift_bits_x,  // 输入 shif
     return lut;
 }
 
-// 生成 Tanh 分段线性拟合 LUT（主机端）
-// Tanh 输入 int16，输出 int16（有符号）
-TanhLUT_INT16 generate_tanh_lut_int16(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y,
-                                      int32_t zp_y, float x_min, float x_max) {
-    TanhLUT_INT16 lut;
+/**
+ * @brief 生成 Tanh 分段线性拟合 LUT（INT16 版本）
+ * @note Tanh 输出范围 [-1, 1]，设备端返回 int16_t
+ */
+SigmoidLUT_INT16 generate_tanh_lut_int16(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y,
+                                         int32_t zp_y, float x_min, float x_max) {
+    SigmoidLUT_INT16 lut;
     lut.shift_bits_x = shift_bits_x;
     lut.zp_x = zp_x;
     lut.shift_bits_y = shift_bits_y;
     lut.zp_y = zp_y;
 
-    // 与 sigmoid 类似的实现，但使用 tanh 函数
+    // 1. 生成分段点
     std::vector<float> segment_points = adaptive_segmentation_sigmoid(x_min, x_max, NUM_SEGMENTS);
+
+    // ===== 第一遍扫描：拟合所有分段，收集所有系数 =====
+    struct SegmentCoeffs {
+        float x_start, x_end;
+        float b, c;
+    };
+    std::vector<SegmentCoeffs> all_coeffs(NUM_SEGMENTS);
 
     for (int i = 0; i < NUM_SEGMENTS; i++) {
         float x_start = segment_points[i];
@@ -927,36 +798,37 @@ TanhLUT_INT16 generate_tanh_lut_int16(int8_t shift_bits_x, int32_t zp_x, int8_t 
         float b_fp, c_fp;
         linear_fit(x_seg, y_seg, b_fp, c_fp);
 
-        int8_t shift_bits_b = determine_shift_bits_int16(std::abs(b_fp));
-        int16_t q_b = quantize_coefficient_int16(b_fp, shift_bits_b);
+        all_coeffs[i] = {x_start, x_end, b_fp, c_fp};
+    }
 
-        float scale_y = std::pow(2.0f, -static_cast<float>(shift_bits_y));
-        float c_adjusted = c_fp + static_cast<float>(zp_y) * scale_y;
+    // ===== 第二遍扫描：统一量化系数 =====
+    float scale_y = std::pow(2.0f, -static_cast<float>(shift_bits_y));
+    float zp_y_offset = static_cast<float>(zp_y) * scale_y;
 
-        int8_t shift_bits_c = determine_shift_bits_int16(std::abs(c_adjusted));
+    float b_abs_max = 0.0f;
+    float c_abs_max = 0.0f;
+    for (int i = 0; i < NUM_SEGMENTS; i++) {
+        b_abs_max = std::max(b_abs_max, std::abs(all_coeffs[i].b));
+        float c_adjusted = all_coeffs[i].c + zp_y_offset;
+        c_abs_max = std::max(c_abs_max, std::abs(c_adjusted));
+    }
+
+    if (b_abs_max < 1e-9f) b_abs_max = 1e-9f;
+    if (c_abs_max < 1e-9f) c_abs_max = 1e-9f;
+
+    int8_t shift_bits_b = determine_shift_bits_int16(b_abs_max);
+    int8_t shift_bits_c = determine_shift_bits_int16(c_abs_max);
+
+    // ===== 第三遍扫描：量化每段并计算移位 =====
+    for (int i = 0; i < NUM_SEGMENTS; i++) {
+        const auto& coeff = all_coeffs[i];
+        float c_adjusted = coeff.c + zp_y_offset;
+
+        int16_t q_b = quantize_coefficient_int16(coeff.b, shift_bits_b);
         int16_t q_c = quantize_coefficient_int16(c_adjusted, shift_bits_c);
 
-        // 计算 shift_bits_bx（根据 bx 的实际范围）
-        float bx_at_start = b_fp * x_start;
-        float bx_at_end = b_fp * x_end;
-        float bx_min = std::min(bx_at_start, bx_at_end);
-        float bx_max = std::max(bx_at_start, bx_at_end);
-
-        // 🔥 修正：根据 Python 参考（u16.py），bx 使用非对称量化（无符号），范围 [0, 65535]
-        // 使用与 Python 一致的 round() 方法，并添加边界调整机制
-        const int32_t max_uint16 = 65535;
-        if (bx_max - bx_min < 1e-9f) {
-            bx_max = bx_min + 1e-9f;  // 避免除零
-        }
-        auto [shift_bits_bx, adjusted_bx_max, zp_bx] =
-            calculate_shift_bits_and_adjust_range(bx_min, bx_max, max_uint16);
-        // 注意：adjusted_bx_max 和 zp_bx 目前不直接使用，但保持与 Python 实现一致
-
-        int8_t n_bx = shift_bits_b + shift_bits_x - shift_bits_bx;
-        int8_t n_yb = shift_bits_bx - shift_bits_y;
+        int8_t n_BX_total = shift_bits_b + shift_bits_x - shift_bits_y;
         int8_t n_yc = shift_bits_c - shift_bits_y;
-
-        int8_t n_BX_total = n_bx + n_yb;
 
         int32_t term_c_precomputed;
         if (n_yc >= 0) {
@@ -965,7 +837,7 @@ TanhLUT_INT16 generate_tanh_lut_int16(int8_t shift_bits_x, int32_t zp_x, int8_t 
             term_c_precomputed = static_cast<int32_t>(q_c) << (-n_yc);
         }
 
-        uint16_t threshold = quantize_input_uint16(x_end, shift_bits_x, zp_x);
+        int16_t threshold = quantize_input_int16(coeff.x_end, shift_bits_x, zp_x);
 
         lut.segments[i].q_b = q_b;
         lut.segments[i].n_BX_total = n_BX_total;
@@ -1004,10 +876,10 @@ void init_sigmoid_r_lut_int16(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bi
 
 void init_tanh_lut_int16(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
                          float x_min, float x_max) {
-    TanhLUT_INT16 lut =
+    SigmoidLUT_INT16 lut =
         generate_tanh_lut_int16(shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
 
-    cudaError_t err = cudaMemcpyToSymbol(d_tanh_lut_int16, &lut, sizeof(TanhLUT_INT16));
+    cudaError_t err = cudaMemcpyToSymbol(d_tanh_lut_int16, &lut, sizeof(SigmoidLUT_INT16));
 
     if (err != cudaSuccess) {
         printf("Failed to copy tanh LUT to constant memory: %s\n", cudaGetErrorString(err));
@@ -1015,30 +887,60 @@ void init_tanh_lut_int16(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y,
 }
 
 // ==================== INT8 版本的分段线性量化参数生成函数 ====================
+//
+// 【生成流程】三遍扫描
+//   Pass 1: 线性拟合每段 → 浮点系数 (b_fp, c_fp)
+//   Pass 2: 统计最大值 → 全局量化参数 (shift_bits_b, shift_bits_c)
+//   Pass 3: 量化系数 → (q_b, term_c_precomputed, n_BX_total)
+//
+// 【量化公式推导】
+//   浮点:  y_fp = b_fp * x_fp + c_fp
+//   
+//   量化:  x_fp = (q_x - zp_x) * scale_x     其中 scale_x = 2^(-shift_bits_x)
+//          y_fp = (q_y - zp_y) * scale_y     其中 scale_y = 2^(-shift_bits_y)
+//          b_fp = q_b * scale_b              其中 scale_b = 2^(-shift_bits_b)
+//          c_fp = q_c * scale_c              其中 scale_c = 2^(-shift_bits_c)
+//   
+//   代入:  (q_y - zp_y) * scale_y = q_b * scale_b * (q_x - zp_x) * scale_x + q_c * scale_c
+//   
+//   整理:  q_y = q_b * (q_x - zp_x) * (scale_b * scale_x / scale_y) + q_c * (scale_c / scale_y) + zp_y
+//             = q_b * (q_x - zp_x) >> (shift_bits_b + shift_bits_x - shift_bits_y)
+//               + q_c >> (shift_bits_c - shift_bits_y) + zp_y
+//   
+//   优化:  将 zp_y 烘焙到 c 中: c_adjusted = c_fp + zp_y * scale_y
+//          n_BX_total = shift_bits_b + shift_bits_x - shift_bits_y
+//          term_c_precomputed = q_c >> (shift_bits_c - shift_bits_y)
+//   
+//   最终:  q_y = (q_b * (q_x - zp_x)) >> n_BX_total + term_c_precomputed
+//
+// =========================================================================
 
-// 生成 Sigmoid 分段线性拟合 LUT（INT8 版本）
-SigmoidLUT_INT8 generate_sigmoid_lut_int8(int8_t shift_bits_x,  // 输入 shift_bits
-                                          int32_t zp_x,         // 输入 zero-point
-                                          int8_t shift_bits_y,  // 输出 shift_bits
-                                          int32_t zp_y,         // 输出 zero-point
-                                          float x_min,          // 输入范围最小值
-                                          float x_max           // 输入范围最大值
-) {
+/**
+ * @brief 生成 Sigmoid 分段线性拟合 LUT（INT8 版本）
+ */
+SigmoidLUT_INT8 generate_sigmoid_lut_int8(int8_t shift_bits_x, int32_t zp_x,
+                                          int8_t shift_bits_y, int32_t zp_y,
+                                          float x_min, float x_max) {
     SigmoidLUT_INT8 lut;
     lut.shift_bits_x = shift_bits_x;
     lut.zp_x = zp_x;
     lut.shift_bits_y = shift_bits_y;
     lut.zp_y = zp_y;
 
-    // 1. 生成分段点（自适应分段）
+    // ===== Pass 1: 生成分段点 + 线性拟合 =====
     std::vector<float> segment_points = adaptive_segmentation_sigmoid(x_min, x_max, NUM_SEGMENTS);
 
-    // 2. 对每段进行线性拟合
+    struct SegmentCoeffs {
+        float x_start, x_end;
+        float b, c;  // y_fp = b * x_fp + c
+    };
+    std::vector<SegmentCoeffs> all_coeffs(NUM_SEGMENTS);
+
     for (int i = 0; i < NUM_SEGMENTS; i++) {
         float x_start = segment_points[i];
         float x_end = segment_points[i + 1];
 
-        // 生成该段的训练数据
+        // 采样并拟合: sigmoid(x) = 1 / (1 + exp(-x))
         const int num_samples = 100;
         std::vector<float> x_seg(num_samples);
         std::vector<float> y_seg(num_samples);
@@ -1046,72 +948,57 @@ SigmoidLUT_INT8 generate_sigmoid_lut_int8(int8_t shift_bits_x,  // 输入 shift_
         for (int j = 0; j < num_samples; j++) {
             float x_val = x_start + (x_end - x_start) * static_cast<float>(j) / (num_samples - 1);
             x_seg[j] = x_val;
-            y_seg[j] = 1.0f / (1.0f + std::exp(-x_val));  // Sigmoid
+            y_seg[j] = 1.0f / (1.0f + std::exp(-x_val));
         }
 
-        // 线性拟合: y = b*x + c
         float b_fp, c_fp;
         linear_fit(x_seg, y_seg, b_fp, c_fp);
+        all_coeffs[i] = {x_start, x_end, b_fp, c_fp};
+    }
 
-        // 3. 量化系数 b（对称量化，zero-point=0）
-        int8_t shift_bits_b = determine_shift_bits_int8(std::abs(b_fp));
-        int8_t q_b = quantize_coefficient_int8(b_fp, shift_bits_b);
+    // ===== Pass 2: 确定全局量化参数 =====
+    // 公式: c_adjusted = c_fp + zp_y * scale_y  (将输出零点烘焙到 c)
+    float scale_y = std::pow(2.0f, -static_cast<float>(shift_bits_y));
+    float zp_y_offset = static_cast<float>(zp_y) * scale_y;
 
-        // 4. 量化系数 c（需要烘焙 zero-point）
-        // c_adjusted = c + zp_y * scale_y
-        float scale_y = std::pow(2.0f, -static_cast<float>(shift_bits_y));
-        float c_adjusted = c_fp + static_cast<float>(zp_y) * scale_y;
+    // 统计 |b| 和 |c_adjusted| 的最大值，用于确定 shift_bits
+    float b_abs_max = 0.0f, c_abs_max = 0.0f;
+    for (int i = 0; i < NUM_SEGMENTS; i++) {
+        b_abs_max = std::max(b_abs_max, std::abs(all_coeffs[i].b));
+        c_abs_max = std::max(c_abs_max, std::abs(all_coeffs[i].c + zp_y_offset));
+    }
+    if (b_abs_max < 1e-9f) b_abs_max = 1e-9f;
+    if (c_abs_max < 1e-9f) c_abs_max = 1e-9f;
 
-        int8_t shift_bits_c = determine_shift_bits_int8(std::abs(c_adjusted));
+    // 公式: scale_b = 2^(-shift_bits_b), 使得 |q_b| <= 127
+    int8_t shift_bits_b = determine_shift_bits_int8(b_abs_max);
+    int8_t shift_bits_c = determine_shift_bits_int8(c_abs_max);
+
+    // ===== Pass 3: 量化系数并计算预计算项 =====
+    for (int i = 0; i < NUM_SEGMENTS; i++) {
+        const auto& coeff = all_coeffs[i];
+
+        // 公式: c_adjusted = c_fp + zp_y * scale_y
+        float c_adjusted = coeff.c + zp_y_offset;
+
+        // 公式: q_b = round(b_fp / scale_b), q_c = round(c_adjusted / scale_c)
+        int8_t q_b = quantize_coefficient_int8(coeff.b, shift_bits_b);
         int16_t q_c = quantize_coefficient_int16(c_adjusted, shift_bits_c);
 
-        // 5. 计算 shift_bits_bx（根据 bx 的实际范围）
-        float bx_at_start = b_fp * x_start;
-        float bx_at_end = b_fp * x_end;
-        float bx_min = std::min(bx_at_start, bx_at_end);
-        float bx_max = std::max(bx_at_start, bx_at_end);
+        // 公式: n_BX_total = shift_bits_b + shift_bits_x - shift_bits_y
+        int8_t n_BX_total = shift_bits_b + shift_bits_x - shift_bits_y;
 
-        // 根据 bx 的范围确定 shift_bits_bx
-        float bx_abs_max = std::max(std::abs(bx_min), std::abs(bx_max));
-        if (bx_abs_max < 1e-9f) {
-            bx_abs_max = 1e-9f;  // 避免除零
-        }
-
-        // 计算 shift_bits_bx：使 scale_bx = 2^(-shift_bits_bx) 能够覆盖 bx 的范围
-        // 🔥 修正：根据 Python 参考（u8.py），bx 使用非对称量化（无符号），范围 [0, 255]
-        // 使用与 Python 一致的 round() 方法，并添加边界调整机制
-        const int32_t max_uint8 = 255;
-        if (bx_max - bx_min < 1e-9f) {
-            bx_max = bx_min + 1e-9f;  // 避免除零
-        }
-        auto [shift_bits_bx, adjusted_bx_max, zp_bx] =
-            calculate_shift_bits_and_adjust_range(bx_min, bx_max, max_uint8);
-        // 注意：adjusted_bx_max 和 zp_bx 目前不直接使用，但保持与 Python 实现一致
-
-        // 6. 计算移位位数（根据文档公式）
-        int8_t n_bx = shift_bits_b + shift_bits_x - shift_bits_bx;
-        int8_t n_yb = shift_bits_bx - shift_bits_y;
+        // 公式: n_yc = shift_bits_c - shift_bits_y
         int8_t n_yc = shift_bits_c - shift_bits_y;
 
-        // 融合移位
-        int8_t n_BX_total = n_bx + n_yb;
+        // 公式: term_c_precomputed = q_c >> n_yc (或 << 如果 n_yc < 0)
+        int16_t term_c_precomputed = (n_yc >= 0) ? static_cast<int16_t>(q_c >> n_yc)
+                                                 : static_cast<int16_t>(q_c << (-n_yc));
+        term_c_precomputed = std::max<int16_t>(-32768, std::min<int16_t>(32767, term_c_precomputed));
 
-        // 7. 预计算 term_c（INT16 存储）
-        int16_t term_c_precomputed;
-        if (n_yc >= 0) {
-            term_c_precomputed = static_cast<int16_t>(q_c >> n_yc);
-        } else {
-            term_c_precomputed = static_cast<int16_t>(q_c << (-n_yc));
-        }
-        // 确保在 INT16 范围内
-        term_c_precomputed =
-            std::max(-32768, std::min(32767, static_cast<int32_t>(term_c_precomputed)));
+        // 公式: threshold = round(x_end / scale_x) + zp_x
+        int8_t threshold = quantize_input_int8(coeff.x_end, shift_bits_x, zp_x);
 
-        // 8. 量化阈值（使用无符号量化，直接使用 quantize_input_uint8）
-        // 🔥 修正：根据 Python 参考，输入应使用无符号量化 [0, 255]
-        uint8_t threshold = quantize_input_uint8(x_end, shift_bits_x, zp_x);
-
-        // 保存段参数
         lut.segments[i].q_b = q_b;
         lut.segments[i].n_BX_total = n_BX_total;
         lut.segments[i].term_c_precomputed = term_c_precomputed;
@@ -1121,18 +1008,28 @@ SigmoidLUT_INT8 generate_sigmoid_lut_int8(int8_t shift_bits_x,  // 输入 shift_
     return lut;
 }
 
-// 生成 Tanh 分段线性拟合 LUT（INT8 版本）
-// Tanh 输入 int8，输出 int8（有符号）
-TanhLUT_INT8 generate_tanh_lut_int8(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y,
-                                    int32_t zp_y, float x_min, float x_max) {
-    TanhLUT_INT8 lut;
+/**
+ * @brief 生成 Tanh 分段线性拟合 LUT（INT8 版本）
+ * @note Tanh 输出范围 [-1, 1]，使用有符号输出
+ */
+SigmoidLUT_INT8 generate_tanh_lut_int8(int8_t shift_bits_x, int32_t zp_x,
+                                       int8_t shift_bits_y, int32_t zp_y,
+                                       float x_min, float x_max) {
+    SigmoidLUT_INT8 lut;
     lut.shift_bits_x = shift_bits_x;
     lut.zp_x = zp_x;
     lut.shift_bits_y = shift_bits_y;
     lut.zp_y = zp_y;
 
-    // 与 sigmoid 类似的实现，但使用 tanh 函数
+    // 1. 生成分段点
     std::vector<float> segment_points = adaptive_segmentation_sigmoid(x_min, x_max, NUM_SEGMENTS);
+
+    // ===== 第一遍扫描：拟合所有分段，收集所有系数 =====
+    struct SegmentCoeffs {
+        float x_start, x_end;
+        float b, c;
+    };
+    std::vector<SegmentCoeffs> all_coeffs(NUM_SEGMENTS);
 
     for (int i = 0; i < NUM_SEGMENTS; i++) {
         float x_start = segment_points[i];
@@ -1151,36 +1048,37 @@ TanhLUT_INT8 generate_tanh_lut_int8(int8_t shift_bits_x, int32_t zp_x, int8_t sh
         float b_fp, c_fp;
         linear_fit(x_seg, y_seg, b_fp, c_fp);
 
-        int8_t shift_bits_b = determine_shift_bits_int8(std::abs(b_fp));
-        int8_t q_b = quantize_coefficient_int8(b_fp, shift_bits_b);
+        all_coeffs[i] = {x_start, x_end, b_fp, c_fp};
+    }
 
-        float scale_y = std::pow(2.0f, -static_cast<float>(shift_bits_y));
-        float c_adjusted = c_fp + static_cast<float>(zp_y) * scale_y;
+    // ===== 第二遍扫描：统一量化系数 =====
+    float scale_y = std::pow(2.0f, -static_cast<float>(shift_bits_y));
+    float zp_y_offset = static_cast<float>(zp_y) * scale_y;
 
-        int8_t shift_bits_c = determine_shift_bits_int8(std::abs(c_adjusted));
+    float b_abs_max = 0.0f;
+    float c_abs_max = 0.0f;
+    for (int i = 0; i < NUM_SEGMENTS; i++) {
+        b_abs_max = std::max(b_abs_max, std::abs(all_coeffs[i].b));
+        float c_adjusted = all_coeffs[i].c + zp_y_offset;
+        c_abs_max = std::max(c_abs_max, std::abs(c_adjusted));
+    }
+
+    if (b_abs_max < 1e-9f) b_abs_max = 1e-9f;
+    if (c_abs_max < 1e-9f) c_abs_max = 1e-9f;
+
+    int8_t shift_bits_b = determine_shift_bits_int8(b_abs_max);
+    int8_t shift_bits_c = determine_shift_bits_int8(c_abs_max);
+
+    // ===== 第三遍扫描：量化每段并计算移位 =====
+    for (int i = 0; i < NUM_SEGMENTS; i++) {
+        const auto& coeff = all_coeffs[i];
+        float c_adjusted = coeff.c + zp_y_offset;
+
+        int8_t q_b = quantize_coefficient_int8(coeff.b, shift_bits_b);
         int16_t q_c = quantize_coefficient_int16(c_adjusted, shift_bits_c);
 
-        // 计算 shift_bits_bx（根据 bx 的实际范围）
-        float bx_at_start = b_fp * x_start;
-        float bx_at_end = b_fp * x_end;
-        float bx_min = std::min(bx_at_start, bx_at_end);
-        float bx_max = std::max(bx_at_start, bx_at_end);
-
-        // 🔥 修正：根据 Python 参考（u8.py），bx 使用非对称量化（无符号），范围 [0, 255]
-        // 使用与 Python 一致的 round() 方法，并添加边界调整机制
-        const int32_t max_uint8 = 255;
-        if (bx_max - bx_min < 1e-9f) {
-            bx_max = bx_min + 1e-9f;  // 避免除零
-        }
-        auto [shift_bits_bx, adjusted_bx_max, zp_bx] =
-            calculate_shift_bits_and_adjust_range(bx_min, bx_max, max_uint8);
-        // 注意：adjusted_bx_max 和 zp_bx 目前不直接使用，但保持与 Python 实现一致
-
-        int8_t n_bx = shift_bits_b + shift_bits_x - shift_bits_bx;
-        int8_t n_yb = shift_bits_bx - shift_bits_y;
+        int8_t n_BX_total = shift_bits_b + shift_bits_x - shift_bits_y;
         int8_t n_yc = shift_bits_c - shift_bits_y;
-
-        int8_t n_BX_total = n_bx + n_yb;
 
         int16_t term_c_precomputed;
         if (n_yc >= 0) {
@@ -1189,10 +1087,9 @@ TanhLUT_INT8 generate_tanh_lut_int8(int8_t shift_bits_x, int32_t zp_x, int8_t sh
             term_c_precomputed = static_cast<int16_t>(q_c << (-n_yc));
         }
         term_c_precomputed =
-            std::max(-32768, std::min(32767, static_cast<int32_t>(term_c_precomputed)));
+            std::max(static_cast<int16_t>(-32768), std::min(static_cast<int16_t>(32767), term_c_precomputed));
 
-        // 🔥 修正：根据 Python 参考，输入应使用无符号量化 [0, 255]
-        uint8_t threshold = quantize_input_uint8(x_end, shift_bits_x, zp_x);
+        int8_t threshold = quantize_input_int8(coeff.x_end, shift_bits_x, zp_x);
 
         lut.segments[i].q_b = q_b;
         lut.segments[i].n_BX_total = n_BX_total;
@@ -1203,322 +1100,49 @@ TanhLUT_INT8 generate_tanh_lut_int8(int8_t shift_bits_x, int32_t zp_x, int8_t sh
     return lut;
 }
 
-// 初始化 LUT（将数据复制到 CUDA 常量内存，INT8 版本 - z 门）
-void init_sigmoid_z_lut_int8(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
-                             float x_min, float x_max) {
-    SigmoidLUT_INT8 lut =
-        generate_sigmoid_lut_int8(shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
+// ==================== INT8 版本的 LUT 初始化函数 ====================
+// 生成 LUT 并复制到 CUDA 常量内存
 
+/// @brief 初始化 z 门的 Sigmoid LUT（INT8 版本）
+void init_sigmoid_z_lut_int8(int8_t shift_bits_x, int32_t zp_x,
+                             int8_t shift_bits_y, int32_t zp_y,
+                             float x_min, float x_max) {
+    SigmoidLUT_INT8 lut = generate_sigmoid_lut_int8(shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
     cudaError_t err = cudaMemcpyToSymbol(d_sigmoid_z_lut_int8, &lut, sizeof(SigmoidLUT_INT8));
-
     if (err != cudaSuccess) {
-        printf("Failed to copy sigmoid z LUT (INT8) to constant memory: %s\n",
-               cudaGetErrorString(err));
+        printf("Failed to copy sigmoid z LUT (INT8) to constant memory: %s\n", cudaGetErrorString(err));
     }
 }
 
-// 初始化 LUT（将数据复制到 CUDA 常量内存，INT8 版本 - r 门）
-void init_sigmoid_r_lut_int8(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
+/// @brief 初始化 r 门的 Sigmoid LUT（INT8 版本）
+void init_sigmoid_r_lut_int8(int8_t shift_bits_x, int32_t zp_x,
+                             int8_t shift_bits_y, int32_t zp_y,
                              float x_min, float x_max) {
-    SigmoidLUT_INT8 lut =
-        generate_sigmoid_lut_int8(shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
-
+    SigmoidLUT_INT8 lut = generate_sigmoid_lut_int8(shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
     cudaError_t err = cudaMemcpyToSymbol(d_sigmoid_r_lut_int8, &lut, sizeof(SigmoidLUT_INT8));
-
     if (err != cudaSuccess) {
-        printf("Failed to copy sigmoid r LUT (INT8) to constant memory: %s\n",
-               cudaGetErrorString(err));
+        printf("Failed to copy sigmoid r LUT (INT8) to constant memory: %s\n", cudaGetErrorString(err));
     }
 }
 
-void init_tanh_lut_int8(int8_t shift_bits_x, int32_t zp_x, int8_t shift_bits_y, int32_t zp_y,
+/// @brief 初始化 g 门的 Tanh LUT（INT8 版本）
+void init_tanh_lut_int8(int8_t shift_bits_x, int32_t zp_x,
+                        int8_t shift_bits_y, int32_t zp_y,
                         float x_min, float x_max) {
-    TanhLUT_INT8 lut = generate_tanh_lut_int8(shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
-
-    cudaError_t err = cudaMemcpyToSymbol(d_tanh_lut_int8, &lut, sizeof(TanhLUT_INT8));
-
+    SigmoidLUT_INT8 lut = generate_tanh_lut_int8(shift_bits_x, zp_x, shift_bits_y, zp_y, x_min, x_max);
+    cudaError_t err = cudaMemcpyToSymbol(d_tanh_lut_int8, &lut, sizeof(SigmoidLUT_INT8));
     if (err != cudaSuccess) {
         printf("Failed to copy tanh LUT (INT8) to constant memory: %s\n", cudaGetErrorString(err));
     }
 }
 
-template <typename T, typename QuantT>
-void calculateScale(const std::vector<T> &data_host, const bool use_symmetric, int32_t &exp2_inv,
-                    int32_t &zp, const std::string &name) {
-    T min_val = data_host[0];
-    T max_val = data_host[0];
-#pragma omp parallel for reduction(min : min_val, max : max_val)
-    for (int i = 1; i < data_host.size(); ++i) {
-        const T val = data_host[i];
-        min_val = std::min(min_val, val);
-        max_val = std::max(max_val, val);
-    }
-    T min_new = min_val;
-    T max_new = max_val;
-    calibrateQuantParams<T, QuantT>(min_val, max_val, use_symmetric, min_new, max_new, exp2_inv, zp,
-                                    name);
-};
+// 显式实例化 generate_piecewise_linear_lut_from_exp2_inv 模板函数
+template void generate_piecewise_linear_lut_from_exp2_inv<int8_t>(
+    int8_t exp2_inv_z_pre, int32_t zp_z_pre, int8_t exp2_inv_z_out, int32_t zp_z_out,
+    int8_t exp2_inv_r_pre, int32_t zp_r_pre, int8_t exp2_inv_r_out, int32_t zp_r_out,
+    int8_t exp2_inv_g_pre, int32_t zp_g_pre, int8_t exp2_inv_g_out, int32_t zp_g_out);
 
-template <typename T, typename QuantT>
-void calculateScale(const T *data_dev, const size_t size, const bool use_symmetric,
-                    int32_t &exp2_inv, int32_t &zp, const std::string &name) {
-    std::vector<T> data_host = d2h(data_dev, size);
-    calculateScale<T, QuantT>(data_host, use_symmetric, exp2_inv, zp, name);
-};
-
-template <typename T, typename QuantT>
-std::vector<int32_t> calculateScalesPerChannels(const T *W_dev, int channel_size, int input_size,
-                                                const std::string &name) {
-    // 列主序排列
-
-    std::vector<T> W_host = d2h(W_dev, channel_size * input_size);
-
-    std::vector<int32_t> exp2_inv_per_channels(channel_size);
-    std::vector<T> min(channel_size);
-    std::vector<T> max(channel_size);
-
-#pragma omp parallel for
-    for (int i = 0; i < channel_size; ++i) {
-        min[i] = W_host[i];
-        max[i] = W_host[i];
-        for (int j = 1; j < input_size; ++j) {
-            min[i] = std::min(min[i], W_host[j * channel_size + i]);
-            max[i] = std::max(max[i], W_host[j * channel_size + i]);
-        }
-    }
-
-    std::vector<int32_t> zp_tmp(channel_size);
-#pragma omp parallel for
-    for (int i = 0; i < channel_size; ++i) {
-        if (min[i] == max[i]) {
-            const float half = std::abs(min[i]);
-            min[i] = -half;
-            max[i] = half;
-        }
-        calibrateQuantParams<T, QuantT>(min[i], max[i], true, min[i], max[i],
-                                        exp2_inv_per_channels[i], zp_tmp[i], name);
-    }
-    return exp2_inv_per_channels;
-};
-
-/**
- * 通用(仅host)scale/zp 计算函数
- * @param x_dev  -- 设备端输入数据指针
- * @param size_per_step -- 每步输入长度
- * @param steps -- 步数
- * @param use_symmetric -- 是否对称量化
- * @param name -- 调试信息
- */
-template <typename T, typename QuantT>
-void calculateScalePerSteps(const T *x_dev, const int size_per_step, const int steps,
-                            const bool use_symmetric, int32_t &exp2_inv, int32_t &zp,
-                            const std::string &name) {
-    if (size_per_step == 0 || steps == 0) {
-        printf("Warning! %s input size = 0\n", name.c_str());
-        return;
-    }
-    std::vector<T> x_host = d2h(x_dev, steps * size_per_step);
-    std::vector<T> min(steps);
-    std::vector<T> max(steps);
-
-#pragma omp parallel for
-    for (int t = 0; t < steps; ++t) {
-        const int offset = t * size_per_step;
-        min[t] = x_host[offset];
-        max[t] = x_host[offset];
-        for (int i = 1; i < size_per_step; ++i) {
-            min[t] = std::min(min[t], x_host[offset + i]);
-            max[t] = std::max(max[t], x_host[offset + i]);
-        }
-    }
-
-    // 使用中位数初始化，避免第一个时间步的异常值影响全局
-    // 创建临时副本用于排序
-    std::vector<T> min_sorted = min;
-    std::vector<T> max_sorted = max;
-    std::sort(min_sorted.begin(), min_sorted.end());
-    std::sort(max_sorted.begin(), max_sorted.end());
-
-    // 使用中位数初始化（如果steps为偶数，使用中间两个值的平均）
-    T res_min = (steps % 2 == 1) ? min_sorted[steps / 2]
-                                 : T(0.5) * (min_sorted[steps / 2 - 1] + min_sorted[steps / 2]);
-    T res_max = (steps % 2 == 1) ? max_sorted[steps / 2]
-                                 : T(0.5) * (max_sorted[steps / 2 - 1] + max_sorted[steps / 2]);
-
-    for (int t = 0; t < steps; ++t) {
-#ifdef DEBUG
-        // 增加调试信息: 输出res_min, res_max, min[t], max[t]
-        printf(
-            "[DEBUG][%s][Step %d] res_min = %.8f, res_max = %.8f, min[t] = %.8f, max[t] = %.8f\n",
-            name.c_str(), t, static_cast<double>(res_min), static_cast<double>(res_max),
-            static_cast<double>(min[t]), static_cast<double>(max[t]));
-#endif
-        // 平滑更新
-        res_min = 0.9 * res_min + 0.1 * min[t];
-        res_max = 0.9 * res_max + 0.1 * max[t];
-
-        //        res_min = std::min(res_min, min[t]);
-        //        res_max = std::max(res_max, max[t]);
-    }
-
-    calibrateQuantParams<T, QuantT>(res_min, res_max, use_symmetric, res_min, res_max, exp2_inv, zp,
-                                    name);
-};
-
-// ==================== 显式实例化 calculateScale ====================
-// 版本1: std::vector 输入
-template void calculateScale<float, int8_t>(const std::vector<float> &data_host,
-                                            const bool use_symmetric, int32_t &exp2_inv,
-                                            int32_t &zp, const std::string &name);
-template void calculateScale<float, int16_t>(const std::vector<float> &data_host,
-                                             const bool use_symmetric, int32_t &exp2_inv,
-                                             int32_t &zp, const std::string &name);
-template void calculateScale<float, int32_t>(const std::vector<float> &data_host,
-                                             const bool use_symmetric, int32_t &exp2_inv,
-                                             int32_t &zp, const std::string &name);
-template void calculateScale<float, uint8_t>(const std::vector<float> &data_host,
-                                             const bool use_symmetric, int32_t &exp2_inv,
-                                             int32_t &zp, const std::string &name);
-template void calculateScale<float, uint16_t>(const std::vector<float> &data_host,
-                                              const bool use_symmetric, int32_t &exp2_inv,
-                                              int32_t &zp, const std::string &name);
-
-// 版本2: 设备指针输入
-template void calculateScale<float, int8_t>(const float *data_dev, const size_t size,
-                                            const bool use_symmetric, int32_t &exp2_inv,
-                                            int32_t &zp, const std::string &name);
-template void calculateScale<float, int16_t>(const float *data_dev, const size_t size,
-                                             const bool use_symmetric, int32_t &exp2_inv,
-                                             int32_t &zp, const std::string &name);
-template void calculateScale<float, int32_t>(const float *data_dev, const size_t size,
-                                             const bool use_symmetric, int32_t &exp2_inv,
-                                             int32_t &zp, const std::string &name);
-template void calculateScale<float, uint8_t>(const float *data_dev, const size_t size,
-                                             const bool use_symmetric, int32_t &exp2_inv,
-                                             int32_t &zp, const std::string &name);
-template void calculateScale<float, uint16_t>(const float *data_dev, const size_t size,
-                                              const bool use_symmetric, int32_t &exp2_inv,
-                                              int32_t &zp, const std::string &name);
-
-// ==================== 显式实例化 calculateScalesPerChannels ====================
-template std::vector<int32_t> calculateScalesPerChannels<float, int8_t>(const float *W_dev,
-                                                                        int channel_size,
-                                                                        int input_size,
-                                                                        const std::string &name);
-template std::vector<int32_t> calculateScalesPerChannels<float, int16_t>(const float *W_dev,
-                                                                         int channel_size,
-                                                                         int input_size,
-                                                                         const std::string &name);
-template std::vector<int32_t> calculateScalesPerChannels<float, int32_t>(const float *W_dev,
-                                                                         int channel_size,
-                                                                         int input_size,
-                                                                         const std::string &name);
-template std::vector<int32_t> calculateScalesPerChannels<float, uint8_t>(const float *W_dev,
-                                                                         int channel_size,
-                                                                         int input_size,
-                                                                         const std::string &name);
-template std::vector<int32_t> calculateScalesPerChannels<float, uint16_t>(const float *W_dev,
-                                                                          int channel_size,
-                                                                          int input_size,
-                                                                          const std::string &name);
-
-// ==================== 显式实例化 calculateScalePerSteps ====================
-template void calculateScalePerSteps<float, int8_t>(const float *x_dev, const int size_per_step,
-                                                    const int steps, const bool use_symmetric,
-                                                    int32_t &exp2_inv, int32_t &zp,
-                                                    const std::string &name);
-template void calculateScalePerSteps<float, int16_t>(const float *x_dev, const int size_per_step,
-                                                     const int steps, const bool use_symmetric,
-                                                     int32_t &exp2_inv, int32_t &zp,
-                                                     const std::string &name);
-template void calculateScalePerSteps<float, int32_t>(const float *x_dev, const int size_per_step,
-                                                     const int steps, const bool use_symmetric,
-                                                     int32_t &exp2_inv, int32_t &zp,
-                                                     const std::string &name);
-template void calculateScalePerSteps<float, uint8_t>(const float *x_dev, const int size_per_step,
-                                                     const int steps, const bool use_symmetric,
-                                                     int32_t &exp2_inv, int32_t &zp,
-                                                     const std::string &name);
-template void calculateScalePerSteps<float, uint16_t>(const float *x_dev, const int size_per_step,
-                                                      const int steps, const bool use_symmetric,
-                                                      int32_t &exp2_inv, int32_t &zp,
-                                                      const std::string &name);
-
-// ==================== double 类型的显式实例化 ====================
-// calculateScale - std::vector 输入
-template void calculateScale<double, int8_t>(const std::vector<double> &data_host,
-                                             const bool use_symmetric, int32_t &exp2_inv,
-                                             int32_t &zp, const std::string &name);
-template void calculateScale<double, int16_t>(const std::vector<double> &data_host,
-                                              const bool use_symmetric, int32_t &exp2_inv,
-                                              int32_t &zp, const std::string &name);
-template void calculateScale<double, int32_t>(const std::vector<double> &data_host,
-                                              const bool use_symmetric, int32_t &exp2_inv,
-                                              int32_t &zp, const std::string &name);
-template void calculateScale<double, uint8_t>(const std::vector<double> &data_host,
-                                              const bool use_symmetric, int32_t &exp2_inv,
-                                              int32_t &zp, const std::string &name);
-template void calculateScale<double, uint16_t>(const std::vector<double> &data_host,
-                                               const bool use_symmetric, int32_t &exp2_inv,
-                                               int32_t &zp, const std::string &name);
-
-// calculateScale - 设备指针输入
-template void calculateScale<double, int8_t>(const double *data_dev, const size_t size,
-                                             const bool use_symmetric, int32_t &exp2_inv,
-                                             int32_t &zp, const std::string &name);
-template void calculateScale<double, int16_t>(const double *data_dev, const size_t size,
-                                              const bool use_symmetric, int32_t &exp2_inv,
-                                              int32_t &zp, const std::string &name);
-template void calculateScale<double, int32_t>(const double *data_dev, const size_t size,
-                                              const bool use_symmetric, int32_t &exp2_inv,
-                                              int32_t &zp, const std::string &name);
-template void calculateScale<double, uint8_t>(const double *data_dev, const size_t size,
-                                              const bool use_symmetric, int32_t &exp2_inv,
-                                              int32_t &zp, const std::string &name);
-template void calculateScale<double, uint16_t>(const double *data_dev, const size_t size,
-                                               const bool use_symmetric, int32_t &exp2_inv,
-                                               int32_t &zp, const std::string &name);
-
-// calculateScalesPerChannels
-template std::vector<int32_t> calculateScalesPerChannels<double, int8_t>(const double *W_dev,
-                                                                         int channel_size,
-                                                                         int input_size,
-                                                                         const std::string &name);
-template std::vector<int32_t> calculateScalesPerChannels<double, int16_t>(const double *W_dev,
-                                                                          int channel_size,
-                                                                          int input_size,
-                                                                          const std::string &name);
-template std::vector<int32_t> calculateScalesPerChannels<double, int32_t>(const double *W_dev,
-                                                                          int channel_size,
-                                                                          int input_size,
-                                                                          const std::string &name);
-template std::vector<int32_t> calculateScalesPerChannels<double, uint8_t>(const double *W_dev,
-                                                                          int channel_size,
-                                                                          int input_size,
-                                                                          const std::string &name);
-template std::vector<int32_t> calculateScalesPerChannels<double, uint16_t>(const double *W_dev,
-                                                                           int channel_size,
-                                                                           int input_size,
-                                                                           const std::string &name);
-
-// calculateScalePerSteps
-template void calculateScalePerSteps<double, int8_t>(const double *x_dev, const int size_per_step,
-                                                     const int steps, const bool use_symmetric,
-                                                     int32_t &exp2_inv, int32_t &zp,
-                                                     const std::string &name);
-template void calculateScalePerSteps<double, int16_t>(const double *x_dev, const int size_per_step,
-                                                      const int steps, const bool use_symmetric,
-                                                      int32_t &exp2_inv, int32_t &zp,
-                                                      const std::string &name);
-template void calculateScalePerSteps<double, int32_t>(const double *x_dev, const int size_per_step,
-                                                      const int steps, const bool use_symmetric,
-                                                      int32_t &exp2_inv, int32_t &zp,
-                                                      const std::string &name);
-template void calculateScalePerSteps<double, uint8_t>(const double *x_dev, const int size_per_step,
-                                                      const int steps, const bool use_symmetric,
-                                                      int32_t &exp2_inv, int32_t &zp,
-                                                      const std::string &name);
-template void calculateScalePerSteps<double, uint16_t>(const double *x_dev, const int size_per_step,
-                                                       const int steps, const bool use_symmetric,
-                                                       int32_t &exp2_inv, int32_t &zp,
-                                                       const std::string &name);
+template void generate_piecewise_linear_lut_from_exp2_inv<int16_t>(
+    int8_t exp2_inv_z_pre, int32_t zp_z_pre, int8_t exp2_inv_z_out, int32_t zp_z_out,
+    int8_t exp2_inv_r_pre, int32_t zp_r_pre, int8_t exp2_inv_r_out, int32_t zp_r_out,
+    int8_t exp2_inv_g_pre, int32_t zp_g_pre, int8_t exp2_inv_g_out, int32_t zp_g_out);

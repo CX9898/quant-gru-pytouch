@@ -164,16 +164,13 @@ class GRUFunction(torch.autograd.Function):
         if use_quantization:
             if quant_params is None:
                 raise RuntimeError("quant_params is required when use_quantization=True")
-            use_int16 = (quant_type == 'int16')
         else:
-            use_int16 = False
             quant_params = gru_ops.GRUQuantitativeParameters()
 
         # 调用 C++ 接口
         output_full, v = gru_ops.forward_interface(
             is_training=is_training,
             is_quant=use_quantization,
-            use_int16=use_int16,
             time_steps=time_steps,
             batch_size=batch_size,
             input_size=input_size,
@@ -465,10 +462,8 @@ class CustomGRU(nn.GRU):
         # 转换权重格式
         W, R, bx, br = self._convert_weights_to_haste_format(device)
 
-        # 校准量化参数
-        use_int16 = (self.quant_type == 'int16')
+        # 校准量化参数（使用默认的 INT8 位宽配置）
         self.quant_params = gru_ops.calibrate_gru_scales(
-            use_int16=use_int16,
             time_steps=time_steps,
             batch_size=batch_size,
             input_size=input_size,
@@ -481,7 +476,7 @@ class CustomGRU(nn.GRU):
         )
         torch.cuda.synchronize()
 
-        # 初始化量化 LUT 表（根据 bitwidth_config 自动选择类型）
+        # 初始化量化 LUT 表
         gru_ops.initialize_quantization_lut(quant_params=self.quant_params)
         torch.cuda.synchronize()
 
